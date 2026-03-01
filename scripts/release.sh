@@ -28,11 +28,8 @@ sed -i "0,/^version = \"$CURRENT\"/s//version = \"$NEW\"/" Cargo.toml
 echo "Building..."
 cargo build --release
 
-# Sync install.sh to docs/
-cp install.sh docs/install.sh
-
 # Commit, tag, push
-git add Cargo.toml Cargo.lock docs/install.sh
+git add Cargo.toml Cargo.lock
 git commit -m "release v$NEW"
 git tag "v$NEW"
 git push
