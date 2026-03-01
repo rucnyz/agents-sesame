@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
+
+use serde::Deserialize;
 
 pub struct AgentConfig {
     pub color: &'static str,
@@ -55,8 +59,30 @@ pub const AGENTS: &[(&str, AgentConfig)] = &[
             badge: "vscode",
         },
     ),
+    (
+        "qwen",
+        AgentConfig {
+            color: "#615CED",
+            badge: "qwen",
+        },
+    ),
+    (
+        "gemini",
+        AgentConfig {
+            color: "#4285F4",
+            badge: "gemini",
+        },
+    ),
+    (
+        "kimi",
+        AgentConfig {
+            color: "#1A73E8",
+            badge: "kimi",
+        },
+    ),
 ];
 
+#[allow(dead_code)]
 pub const SCHEMA_VERSION: u32 = 20;
 
 fn home_dir() -> PathBuf {
@@ -92,15 +118,115 @@ pub fn crush_projects_file() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
-    home_dir().join(".cache/fast-resume")
+    home_dir().join(".cache/rust-resume")
+}
+
+pub fn config_file() -> PathBuf {
+    home_dir().join(".config/rust-resume/config.toml")
 }
 
 pub fn index_dir() -> PathBuf {
     cache_dir().join("tantivy_index_rs")
 }
 
+#[allow(dead_code)]
 pub fn log_file() -> PathBuf {
     cache_dir().join("parse-errors.log")
+}
+
+/// Application configuration loaded from TOML.
+#[derive(Debug, Deserialize, Default)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub agents: HashMap<String, AgentPathConfig>,
+}
+
+/// Per-agent path configuration. All fields optional.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct AgentPathConfig {
+    pub dir: Option<PathBuf>,
+    pub db: Option<PathBuf>,
+    pub projects_file: Option<PathBuf>,
+    pub chat_dir: Option<PathBuf>,
+    pub workspace_dir: Option<PathBuf>,
+    pub legacy_dir: Option<PathBuf>,
+}
+
+impl AppConfig {
+    /// Load config from ~/.config/rust-resume/config.toml, returning defaults if missing.
+    pub fn load() -> Self {
+        let path = config_file();
+        match fs::read_to_string(path) {
+            Ok(s) => toml::from_str(&s).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Get a dir path for an agent, falling back to the provided default.
+    pub fn agent_dir(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.dir.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+
+    /// Get a db path for an agent, falling back to the provided default.
+    pub fn agent_db(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.db.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+
+    /// Get a projects_file path for an agent, falling back to the provided default.
+    pub fn agent_projects_file(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.projects_file.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+
+    /// Get chat_dir for an agent (copilot-vscode), falling back to default.
+    pub fn agent_chat_dir(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.chat_dir.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+
+    /// Get workspace_dir for an agent (copilot-vscode), falling back to default.
+    pub fn agent_workspace_dir(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.workspace_dir.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+
+    /// Get legacy_dir for an agent (opencode), falling back to default.
+    pub fn agent_legacy_dir(&self, agent: &str, default: PathBuf) -> PathBuf {
+        self.agents
+            .get(agent)
+            .and_then(|c| c.legacy_dir.clone())
+            .map(expand_tilde)
+            .unwrap_or(default)
+    }
+}
+
+/// Expand ~ to home directory in a path.
+fn expand_tilde(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix("~/") {
+        home_dir().join(rest)
+    } else if s == "~" {
+        home_dir()
+    } else {
+        path
+    }
 }
 
 pub fn get_agent_config(name: &str) -> Option<&'static AgentConfig> {

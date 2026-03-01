@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use crate::adapter::AgentAdapter;
-use crate::adapters::ClaudeAdapter;
+use crate::adapters::{
+    ClaudeAdapter, CodexAdapter, CopilotAdapter, CopilotVSCodeAdapter, CrushAdapter,
+    GeminiAdapter, KimiAdapter, OpenCodeAdapter, QwenAdapter, VibeAdapter,
+};
+use crate::config::{self, AppConfig};
 use crate::index::TantivyIndex;
 use crate::query::{parse_query, Filter};
 use crate::session::Session;
@@ -12,10 +16,34 @@ pub struct SessionSearch {
     index: TantivyIndex,
 }
 
+impl Default for SessionSearch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionSearch {
     pub fn new() -> Self {
+        let cfg = AppConfig::load();
         Self {
-            adapters: vec![Box::new(ClaudeAdapter::new())],
+            adapters: vec![
+                Box::new(ClaudeAdapter::new(cfg.agent_dir("claude", config::claude_dir()))),
+                Box::new(CodexAdapter::new(cfg.agent_dir("codex", config::codex_dir()))),
+                Box::new(CopilotAdapter::new(cfg.agent_dir("copilot-cli", config::copilot_dir()))),
+                Box::new(CopilotVSCodeAdapter::new(
+                    cfg.agent_chat_dir("copilot-vscode", CopilotVSCodeAdapter::default_chat_dir()),
+                    cfg.agent_workspace_dir("copilot-vscode", CopilotVSCodeAdapter::default_workspace_dir()),
+                )),
+                Box::new(CrushAdapter::new(cfg.agent_projects_file("crush", config::crush_projects_file()))),
+                Box::new(GeminiAdapter::new(cfg.agent_dir("gemini", GeminiAdapter::default_dir()))),
+                Box::new(KimiAdapter::new(cfg.agent_dir("kimi", KimiAdapter::default_dir()))),
+                Box::new(OpenCodeAdapter::new(
+                    cfg.agent_db("opencode", config::opencode_db()),
+                    cfg.agent_legacy_dir("opencode", config::opencode_dir().join("storage")),
+                )),
+                Box::new(QwenAdapter::new(cfg.agent_dir("qwen", QwenAdapter::default_dir()))),
+                Box::new(VibeAdapter::new(cfg.agent_dir("vibe", config::vibe_dir()))),
+            ],
             sessions_by_id: HashMap::new(),
             index: TantivyIndex::new(),
         }

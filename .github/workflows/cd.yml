@@ -1,0 +1,103 @@
+name: CD
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          prerelease: false
+          generateReleaseNotes: true
+
+  build-release:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary-postfix: ""
+            use-cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary-postfix: ""
+            use-cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary-postfix: ""
+            use-cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary-postfix: ""
+            use-cross: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install cross
+        if: matrix.use-cross
+        run: cargo install cross
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Strip binary
+        run: |
+          BIN=target/${{ matrix.target }}/release/fr-rs${{ matrix.binary-postfix }}
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y binutils-aarch64-linux-gnu
+            aarch64-linux-gnu-strip "$BIN"
+          elif [ "${{ runner.os }}" != "macOS" ]; then
+            strip "$BIN"
+          fi
+
+      - name: Package
+        run: |
+          BIN=target/${{ matrix.target }}/release/fr-rs${{ matrix.binary-postfix }}
+          RELEASE_NAME=fr-rs-${GITHUB_REF/refs\/tags\//}-${{ matrix.target }}
+          mkdir -p "$RELEASE_NAME"
+          cp "$BIN" "$RELEASE_NAME/"
+          tar czvf "$RELEASE_NAME.tar.gz" "$RELEASE_NAME"
+          shasum -a 256 "$RELEASE_NAME.tar.gz" > "$RELEASE_NAME.tar.gz.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fr-rs-*.tar.gz
+            fr-rs-*.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

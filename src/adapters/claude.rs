@@ -6,7 +6,6 @@ use chrono::DateTime;
 use serde_json::Value;
 
 use crate::adapter::{incremental_scan, AgentAdapter, ErrorCallback, SessionCallback};
-use crate::config;
 use crate::session::{truncate_title, RawAdapterStats, Session};
 
 pub struct ClaudeAdapter {
@@ -14,10 +13,8 @@ pub struct ClaudeAdapter {
 }
 
 impl ClaudeAdapter {
-    pub fn new() -> Self {
-        Self {
-            sessions_dir: config::claude_dir(),
-        }
+    pub fn new(sessions_dir: PathBuf) -> Self {
+        Self { sessions_dir }
     }
 
     fn scan_session_files(&self) -> HashMap<String, (PathBuf, f64)> {
@@ -104,11 +101,10 @@ impl ClaudeAdapter {
             match msg_type {
                 "user" => {
                     // Extract directory from first user message
-                    if directory.is_empty() {
-                        if let Some(cwd) = val.get("cwd").and_then(Value::as_str) {
+                    if directory.is_empty()
+                        && let Some(cwd) = val.get("cwd").and_then(Value::as_str) {
                             directory = cwd.to_string();
                         }
-                    }
 
                     let content = val
                         .get("message")
@@ -149,14 +145,13 @@ impl ClaudeAdapter {
                                         .map(String::from),
                                     _ => None,
                                 };
-                                if let Some(text) = text {
-                                    if !text.is_empty() {
+                                if let Some(text) = text
+                                    && !text.is_empty() {
                                         messages.push(format!("» {text}"));
                                         if first_user_message.is_empty() && text.chars().count() > 4 {
                                             first_user_message = text;
                                         }
                                     }
-                                }
                             }
                             if is_human {
                                 turn_count += 1;
@@ -199,12 +194,11 @@ impl ClaudeAdapter {
                                     }
                                     _ => None,
                                 };
-                                if let Some(text) = text {
-                                    if !text.is_empty() {
+                                if let Some(text) = text
+                                    && !text.is_empty() {
                                         messages.push(format!("  {text}"));
                                         has_text = true;
                                     }
-                                }
                             }
                         }
                         _ => {}

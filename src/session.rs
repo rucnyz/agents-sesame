@@ -14,6 +14,7 @@ pub struct Session {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RawAdapterStats {
     pub agent: String,
     pub data_dir: String,
@@ -23,6 +24,7 @@ pub struct RawAdapterStats {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ParseError {
     pub agent: String,
     pub file_path: String,
@@ -41,11 +43,10 @@ pub fn truncate_title(text: &str, max_length: usize) -> String {
     let truncated: String = chars.into_iter().collect();
 
     // Try to break at last space for cleaner truncation
-    if let Some(last_space) = truncated.rfind(' ') {
-        if last_space > max_length / 2 {
+    if let Some(last_space) = truncated.rfind(' ')
+        && last_space > max_length / 2 {
             return format!("{}...", &truncated[..last_space]);
         }
-    }
     format!("{truncated}...")
 }
 

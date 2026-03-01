@@ -1,3 +1,21 @@
 mod claude;
+mod codex;
+mod copilot;
+mod copilot_vscode;
+mod crush;
+mod gemini;
+mod kimi;
+mod opencode;
+mod qwen;
+mod vibe;
 
 pub use claude::ClaudeAdapter;
+pub use codex::CodexAdapter;
+pub use copilot::CopilotAdapter;
+pub use copilot_vscode::CopilotVSCodeAdapter;
+pub use crush::CrushAdapter;
+pub use gemini::GeminiAdapter;
+pub use kimi::KimiAdapter;
+pub use opencode::OpenCodeAdapter;
+pub use qwen::QwenAdapter;
+pub use vibe::VibeAdapter;

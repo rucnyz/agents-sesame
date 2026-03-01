@@ -47,7 +47,7 @@ pub fn run() -> anyhow::Result<()> {
     if cli.ids || cli.no_tui || cli.list_only {
         list_sessions(&cli)?;
     } else {
-        eprintln!("TUI mode not yet implemented. Use --no-tui or --list.");
+        crate::tui::run_tui(cli.yolo, cli.directory.as_deref())?;
     }
 
     Ok(())
@@ -104,8 +104,8 @@ fn print_sessions(sessions: &[crate::session::Session]) {
     let display_count = total.min(50);
 
     println!(
-        "{:<10} {:<52} {:<37} {}",
-        "Agent", "Title", "Directory", "ID"
+        "{:<10} {:<52} {:<37} ID",
+        "Agent", "Title", "Directory"
     );
     println!("{}", "-".repeat(120));
 

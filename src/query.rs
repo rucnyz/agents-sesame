@@ -138,14 +138,14 @@ pub fn parse_query(query: &str) -> ParsedQuery {
                 let mut filter = parse_filter_value(value);
                 if negated_prefix {
                     // Move all includes to excludes
-                    filter.exclude.extend(filter.include.drain(..));
+                    filter.exclude.append(&mut filter.include);
                 }
                 result.agent = Some(filter);
             }
             "dir" => {
                 let mut filter = parse_filter_value(value);
                 if negated_prefix {
-                    filter.exclude.extend(filter.include.drain(..));
+                    filter.exclude.append(&mut filter.include);
                 }
                 result.directory = Some(filter);
             }

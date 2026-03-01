@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{DateTime, NaiveDateTime};
+use chrono::DateTime;
 use tantivy::collector::TopDocs;
 use tantivy::query::{
     AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, QueryParser,
@@ -10,7 +10,7 @@ use tantivy::query::{
 };
 use tantivy::schema::*;
 use tantivy::{
-    doc, Directory, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Searcher, Term,
+    doc, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Searcher, Term,
 };
 
 use crate::config;
@@ -36,6 +36,12 @@ pub struct TantivyIndex {
     f_message_count: Field,
     f_mtime: Field,
     f_yolo: Field,
+}
+
+impl Default for TantivyIndex {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TantivyIndex {
@@ -205,15 +211,14 @@ impl TantivyIndex {
         let all_docs = TopDocs::with_limit(1_000_000);
         if let Ok(results) = searcher.search(&AllQuery, &all_docs) {
             for (_score, addr) in results {
-                if let Ok(doc) = searcher.doc::<tantivy::TantivyDocument>(addr) {
-                    if let (Some(id), Some(mtime), Some(agent)) = (
+                if let Ok(doc) = searcher.doc::<tantivy::TantivyDocument>(addr)
+                    && let (Some(id), Some(mtime), Some(agent)) = (
                         doc.get_first(self.f_id).and_then(|v| v.as_str()),
                         doc.get_first(self.f_mtime).and_then(|v| v.as_f64()),
                         doc.get_first(self.f_agent).and_then(|v| v.as_str()),
                     ) {
                         known.insert(id.to_string(), (mtime, agent.to_string()));
                     }
-                }
             }
         }
         known
@@ -227,17 +232,17 @@ impl TantivyIndex {
         let all_docs = TopDocs::with_limit(1_000_000);
         if let Ok(results) = searcher.search(&AllQuery, &all_docs) {
             for (_score, addr) in results {
-                if let Ok(doc) = searcher.doc::<tantivy::TantivyDocument>(addr) {
-                    if let Some(session) = self.doc_to_session(&doc) {
+                if let Ok(doc) = searcher.doc::<tantivy::TantivyDocument>(addr)
+                    && let Some(session) = self.doc_to_session(&doc) {
                         sessions.push(session);
                     }
-                }
             }
         }
         sessions
     }
 
     /// Add sessions to the index.
+    #[allow(dead_code)]
     pub fn add_sessions(&self, sessions: &[Session]) {
         if sessions.is_empty() {
             return;
@@ -286,6 +291,7 @@ impl TantivyIndex {
     }
 
     /// Get session count, optionally filtered by agent.
+    #[allow(dead_code)]
     pub fn get_session_count(&self, agent_filter: Option<&str>) -> usize {
         let searcher = self.searcher();
         let query: Box<dyn tantivy::query::Query> = match agent_filter {
@@ -318,32 +324,28 @@ impl TantivyIndex {
         let mut must_clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
         // Text query (hybrid exact + fuzzy)
-        if !query_text.is_empty() && !sort_by_time {
-            if let Some(q) = self.build_hybrid_query(index, query_text) {
+        if !query_text.is_empty() && !sort_by_time
+            && let Some(q) = self.build_hybrid_query(index, query_text) {
                 must_clauses.push((Occur::Must, q));
             }
-        }
 
         // Agent filter
-        if let Some(filter) = agent_filter {
-            if let Some(q) = self.build_agent_filter(filter) {
+        if let Some(filter) = agent_filter
+            && let Some(q) = self.build_agent_filter(filter) {
                 must_clauses.push((Occur::Must, q));
             }
-        }
 
         // Directory filter
-        if let Some(filter) = directory_filter {
-            if let Some(q) = self.build_directory_filter(filter) {
+        if let Some(filter) = directory_filter
+            && let Some(q) = self.build_directory_filter(filter) {
                 must_clauses.push((Occur::Must, q));
             }
-        }
 
         // Date filter
-        if let Some(filter) = date_filter {
-            if let Some(q) = self.build_date_filter(filter) {
+        if let Some(filter) = date_filter
+            && let Some(q) = self.build_date_filter(filter) {
                 must_clauses.push((Occur::Must, q));
             }
-        }
 
         let final_query: Box<dyn tantivy::query::Query> = if must_clauses.is_empty() {
             Box::new(AllQuery)

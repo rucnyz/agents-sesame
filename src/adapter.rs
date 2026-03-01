@@ -7,6 +7,7 @@ pub type ErrorCallback = Option<Box<dyn Fn(&ParseError) + Send + Sync>>;
 pub type SessionCallback = Option<Box<dyn Fn(&Session) + Send + Sync>>;
 
 /// Trait for all agent adapters.
+#[allow(dead_code)]
 pub trait AgentAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn color(&self) -> &str;
@@ -63,15 +64,14 @@ pub fn incremental_scan(
             None => true,
         };
 
-        if needs_parse {
-            if let Some(mut session) = parse_file(path) {
+        if needs_parse
+            && let Some(mut session) = parse_file(path) {
                 session.mtime = *mtime;
                 if let Some(cb) = on_session {
                     cb(&session);
                 }
                 new_or_modified.push(session);
             }
-        }
     }
 
     // Find deleted sessions
