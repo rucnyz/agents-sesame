@@ -1,5 +1,9 @@
 # agents-sesame (ase)
 
+[![Crates.io](https://img.shields.io/crates/v/agents-sesame)](https://crates.io/crates/agents-sesame)
+[![CI](https://github.com/rucnyz/agents-sesame/actions/workflows/ci.yml/badge.svg)](https://github.com/rucnyz/agents-sesame/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Fast fuzzy finder TUI for coding agent session history. Search and resume sessions across 10 coding agents.
 
 ## Supported Agents
@@ -16,10 +20,15 @@ curl -fsSL https://rucnyz.github.io/agents-sesame/install.sh | bash
 
 Installs `ase` (+ `agents-sesame` symlink) to `~/.local/bin/`. Supports Linux (x86_64/aarch64) and macOS (Intel/Apple Silicon).
 
-### From source
+### crates.io
 
 ```sh
-# requires Rust toolchain (https://rustup.rs)
+cargo install agents-sesame
+```
+
+### From source (latest dev)
+
+```sh
 cargo install --git https://github.com/rucnyz/agents-sesame
 ```
 

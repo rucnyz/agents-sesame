@@ -35,6 +35,11 @@ git tag "v$NEW"
 git push
 git push --tags
 
+# Publish to crates.io
+echo "Publishing to crates.io..."
+cargo publish
+
 echo ""
 echo "Released v$NEW"
 echo "CD workflow will build and upload binaries to GitHub Releases."
+echo "Published to https://crates.io/crates/agents-sesame"
