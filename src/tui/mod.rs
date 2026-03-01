@@ -12,12 +12,12 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Terminal;
 
 use app::App;
 use filter_bar::FilterBar;
@@ -105,7 +105,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
             Constraint::Length(1), // title bar
             Constraint::Length(3), // search box
             Constraint::Length(1), // filter bar
-            Constraint::Min(5),   // main content
+            Constraint::Min(5),    // main content
             Constraint::Length(1), // footer
         ])
         .split(area);
@@ -120,7 +120,11 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let count = app.filtered.len();
     let total = app.total_count;
-    let sort_label = if app.sort_by_time { "time" } else { "relevance" };
+    let sort_label = if app.sort_by_time {
+        "time"
+    } else {
+        "relevance"
+    };
 
     let spans = vec![
         Span::styled(
@@ -160,9 +164,7 @@ fn draw_search_box(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let mut spans = vec![
-        Span::styled("/ ", Style::default().fg(Color::DarkGray)),
-    ];
+    let mut spans = vec![Span::styled("/ ", Style::default().fg(Color::DarkGray))];
 
     if app.query.is_empty() {
         spans.push(Span::styled(
@@ -185,7 +187,8 @@ fn draw_search_box(f: &mut ratatui::Frame, area: Rect, app: &App) {
     f.render_widget(line, inner);
 
     // Show cursor — use display width for CJK support
-    let cursor_x = inner.x + 2 + unicode_width::UnicodeWidthStr::width(&app.query[..app.cursor_pos]) as u16;
+    let cursor_x =
+        inner.x + 2 + unicode_width::UnicodeWidthStr::width(&app.query[..app.cursor_pos]) as u16;
     let cursor_y = inner.y;
     if cursor_x < inner.x + inner.width {
         f.set_cursor_position((cursor_x, cursor_y));

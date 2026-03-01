@@ -6,7 +6,7 @@ use chrono::DateTime;
 use serde_json::Value;
 
 use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 pub struct CrushAdapter {
     projects_file: PathBuf,
@@ -73,12 +73,12 @@ impl CrushAdapter {
 
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,          // id
-                row.get::<_, Option<String>>(1)?,   // title
-                row.get::<_, Option<i64>>(3)?,      // updated_at
-                row.get::<_, Option<i64>>(4)?,      // created_at
-                row.get::<_, Option<String>>(5)?,   // role
-                row.get::<_, Option<String>>(6)?,   // parts
+                row.get::<_, String>(0)?,         // id
+                row.get::<_, Option<String>>(1)?, // title
+                row.get::<_, Option<i64>>(3)?,    // updated_at
+                row.get::<_, Option<i64>>(4)?,    // created_at
+                row.get::<_, Option<String>>(5)?, // role
+                row.get::<_, Option<String>>(6)?, // parts
             ))
         });
 
@@ -102,10 +102,7 @@ impl CrushAdapter {
             }
 
             if let (Some(role), Some(parts)) = (role, parts) {
-                session_messages
-                    .entry(id)
-                    .or_default()
-                    .push((role, parts));
+                session_messages.entry(id).or_default().push((role, parts));
             }
         }
 
@@ -206,15 +203,17 @@ fn extract_text_from_parts(parts_json: &str) -> String {
         match part_type {
             "text" => {
                 if let Some(text) = data.and_then(|d| d.get("text")).and_then(Value::as_str)
-                    && !text.is_empty() {
-                        text_parts.push(text.to_string());
-                    }
+                    && !text.is_empty()
+                {
+                    text_parts.push(text.to_string());
+                }
             }
             "tool_call" => {
                 if let Some(name) = data.and_then(|d| d.get("name")).and_then(Value::as_str)
-                    && !name.is_empty() {
-                        text_parts.push(format!("[calling {name}]"));
-                    }
+                    && !name.is_empty()
+                {
+                    text_parts.push(format!("[calling {name}]"));
+                }
             }
             "tool_result" => {
                 if let Some(d) = data {
@@ -285,9 +284,7 @@ impl AgentAdapter for CrushAdapter {
                 all_current_ids.insert(session.id.clone());
                 let session_mtime = session.timestamp.and_utc().timestamp() as f64;
                 let known_entry = known.get(&session.id);
-                if known_entry.is_none()
-                    || session_mtime > known_entry.unwrap().0 + 0.001
-                {
+                if known_entry.is_none() || session_mtime > known_entry.unwrap().0 + 0.001 {
                     session.mtime = session_mtime;
                     if let Some(cb) = on_session {
                         cb(&session);
@@ -322,7 +319,11 @@ impl AgentAdapter for CrushAdapter {
         }
         RawAdapterStats {
             agent: "crush".to_string(),
-            data_dir: self.projects_file.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+            data_dir: self
+                .projects_file
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
             available: self.is_available(),
             file_count,
             total_bytes,

@@ -82,8 +82,10 @@ impl OpenCodeAdapter {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -115,19 +117,19 @@ impl OpenCodeAdapter {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             }) {
                 for row in rows.flatten() {
                     if let Some(text) = row.1
-                        && !text.is_empty() {
-                            parts_by_message.entry(row.0).or_default().push(text);
-                        }
+                        && !text.is_empty()
+                    {
+                        parts_by_message.entry(row.0).or_default().push(text);
+                    }
                 }
             }
         }
@@ -136,8 +138,7 @@ impl OpenCodeAdapter {
         for (id, title, directory, time_created, time_updated) in session_rows {
             let time_ms = time_created.max(time_updated);
             let timestamp = if time_ms > 0 {
-                DateTime::from_timestamp(time_ms / 1000, 0)
-                    .map(|dt| dt.naive_utc())
+                DateTime::from_timestamp(time_ms / 1000, 0).map(|dt| dt.naive_utc())
             } else {
                 None
             };
@@ -203,9 +204,9 @@ impl OpenCodeAdapter {
         };
 
         // Step 1: lightweight query — only session metadata
-        let mut stmt = match conn.prepare(
-            "SELECT id, title, directory, time_created, time_updated FROM session",
-        ) {
+        let mut stmt = match conn
+            .prepare("SELECT id, title, directory, time_created, time_updated FROM session")
+        {
             Ok(s) => s,
             Err(_) => return (vec![], vec![]),
         };
@@ -276,8 +277,10 @@ impl OpenCodeAdapter {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -308,19 +311,19 @@ impl OpenCodeAdapter {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let params: Vec<&dyn rusqlite::types::ToSql> =
-                chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|s| s as &dyn rusqlite::types::ToSql)
+                .collect();
             if let Ok(rows) = stmt.query_map(params.as_slice(), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             }) {
                 for row in rows.flatten() {
                     if let Some(text) = row.1
-                        && !text.is_empty() {
-                            parts_by_message.entry(row.0).or_default().push(text);
-                        }
+                        && !text.is_empty()
+                    {
+                        parts_by_message.entry(row.0).or_default().push(text);
+                    }
                 }
             }
         }
@@ -389,10 +392,7 @@ impl OpenCodeAdapter {
         // Pre-index messages by session_id
         let mut messages_by_session: HashMap<String, Vec<(String, String)>> = HashMap::new();
         if message_dir.exists() {
-            for entry in walkdir::WalkDir::new(&message_dir)
-                .into_iter()
-                .flatten()
-            {
+            for entry in walkdir::WalkDir::new(&message_dir).into_iter().flatten() {
                 let path = entry.path();
                 if path.extension().is_none_or(|e| e != "json") {
                     continue;
@@ -404,30 +404,31 @@ impl OpenCodeAdapter {
                     continue;
                 }
                 if let Ok(data) = fs::read(path)
-                    && let Ok(val) = serde_json::from_slice::<Value>(&data) {
-                        let session_id = path
-                            .parent()
-                            .and_then(|p| p.file_name())
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let msg_id = val
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        let role = val
-                            .get("role")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        if !msg_id.is_empty() {
-                            messages_by_session
-                                .entry(session_id)
-                                .or_default()
-                                .push((msg_id, role));
-                        }
+                    && let Ok(val) = serde_json::from_slice::<Value>(&data)
+                {
+                    let session_id = path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let msg_id = val
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let role = val
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if !msg_id.is_empty() {
+                        messages_by_session
+                            .entry(session_id)
+                            .or_default()
+                            .push((msg_id, role));
                     }
+                }
             }
         }
 
@@ -441,22 +442,23 @@ impl OpenCodeAdapter {
                 }
                 if let Ok(data) = fs::read(path)
                     && let Ok(val) = serde_json::from_slice::<Value>(&data)
-                        && val.get("type").and_then(Value::as_str) == Some("text") {
-                            let msg_id = path
-                                .parent()
-                                .and_then(|p| p.file_name())
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let text = val
-                                .get("text")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_string();
-                            if !text.is_empty() {
-                                parts_by_message.entry(msg_id).or_default().push(text);
-                            }
-                        }
+                    && val.get("type").and_then(Value::as_str) == Some("text")
+                {
+                    let msg_id = path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let text = val
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if !text.is_empty() {
+                        parts_by_message.entry(msg_id).or_default().push(text);
+                    }
+                }
             }
         }
 
@@ -535,7 +537,10 @@ impl OpenCodeAdapter {
         };
 
         let mut messages: Vec<String> = Vec::new();
-        let session_msgs = messages_by_session.get(&session_id).cloned().unwrap_or_default();
+        let session_msgs = messages_by_session
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_default();
         for (msg_id, role) in &session_msgs {
             let prefix = if role == "user" { "» " } else { "  " };
             if let Some(parts) = parts_by_message.get(msg_id) {
@@ -646,13 +651,18 @@ impl AgentAdapter for OpenCodeAdapter {
         let mut file_count = 0;
         let mut total_bytes = 0;
         if self.has_sqlite()
-            && let Ok(meta) = fs::metadata(&self.db_path) {
-                file_count += 1;
-                total_bytes += meta.len();
-            }
+            && let Ok(meta) = fs::metadata(&self.db_path)
+        {
+            file_count += 1;
+            total_bytes += meta.len();
+        }
         RawAdapterStats {
             agent: "opencode".to_string(),
-            data_dir: self.db_path.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+            data_dir: self
+                .db_path
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
             available: self.is_available(),
             file_count,
             total_bytes,

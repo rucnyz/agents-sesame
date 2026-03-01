@@ -64,14 +64,13 @@ pub fn incremental_scan(
             None => true,
         };
 
-        if needs_parse
-            && let Some(mut session) = parse_file(path) {
-                session.mtime = *mtime;
-                if let Some(cb) = on_session {
-                    cb(&session);
-                }
-                new_or_modified.push(session);
+        if needs_parse && let Some(mut session) = parse_file(path) {
+            session.mtime = *mtime;
+            if let Some(cb) = on_session {
+                cb(&session);
             }
+            new_or_modified.push(session);
+        }
     }
 
     // Find deleted sessions

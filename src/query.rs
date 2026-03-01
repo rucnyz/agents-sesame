@@ -30,13 +30,11 @@ pub struct ParsedQuery {
     pub date: Option<DateFilter>,
 }
 
-static KEYWORD_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(-?)(agent|dir|date):(?:"([^"]+)"|(\S+))"#).unwrap()
-});
+static KEYWORD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(-?)(agent|dir|date):(?:"([^"]+)"|(\S+))"#).unwrap());
 
-static RELATIVE_TIME_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([<>])?(\d+)(m|h|d|w|mo|y)$").unwrap()
-});
+static RELATIVE_TIME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([<>])?(\d+)(m|h|d|w|mo|y)$").unwrap());
 
 fn parse_filter_value(value: &str) -> Filter {
     let mut include = Vec::new();

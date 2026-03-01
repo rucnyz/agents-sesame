@@ -5,13 +5,11 @@ use std::path::PathBuf;
 use chrono::DateTime;
 use tantivy::collector::TopDocs;
 use tantivy::query::{
-    AllQuery, BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, QueryParser,
-    FastFieldRangeQuery, RegexQuery, TermQuery, TermSetQuery,
+    AllQuery, BooleanQuery, BoostQuery, FastFieldRangeQuery, FuzzyTermQuery, Occur, QueryParser,
+    RegexQuery, TermQuery, TermSetQuery,
 };
 use tantivy::schema::*;
-use tantivy::{
-    doc, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Searcher, Term,
-};
+use tantivy::{Index, IndexReader, IndexWriter, Order, ReloadPolicy, Searcher, Term, doc};
 
 use crate::config;
 use crate::query::{DateFilter, DateOp, Filter};
@@ -216,9 +214,10 @@ impl TantivyIndex {
                         doc.get_first(self.f_id).and_then(|v| v.as_str()),
                         doc.get_first(self.f_mtime).and_then(|v| v.as_f64()),
                         doc.get_first(self.f_agent).and_then(|v| v.as_str()),
-                    ) {
-                        known.insert(id.to_string(), (mtime, agent.to_string()));
-                    }
+                    )
+                {
+                    known.insert(id.to_string(), (mtime, agent.to_string()));
+                }
             }
         }
         known
@@ -233,9 +232,10 @@ impl TantivyIndex {
         if let Ok(results) = searcher.search(&AllQuery, &all_docs) {
             for (_score, addr) in results {
                 if let Ok(doc) = searcher.doc::<tantivy::TantivyDocument>(addr)
-                    && let Some(session) = self.doc_to_session(&doc) {
-                        sessions.push(session);
-                    }
+                    && let Some(session) = self.doc_to_session(&doc)
+                {
+                    sessions.push(session);
+                }
             }
         }
         sessions
@@ -324,28 +324,33 @@ impl TantivyIndex {
         let mut must_clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
         // Text query (hybrid exact + fuzzy)
-        if !query_text.is_empty() && !sort_by_time
-            && let Some(q) = self.build_hybrid_query(index, query_text) {
-                must_clauses.push((Occur::Must, q));
-            }
+        if !query_text.is_empty()
+            && !sort_by_time
+            && let Some(q) = self.build_hybrid_query(index, query_text)
+        {
+            must_clauses.push((Occur::Must, q));
+        }
 
         // Agent filter
         if let Some(filter) = agent_filter
-            && let Some(q) = self.build_agent_filter(filter) {
-                must_clauses.push((Occur::Must, q));
-            }
+            && let Some(q) = self.build_agent_filter(filter)
+        {
+            must_clauses.push((Occur::Must, q));
+        }
 
         // Directory filter
         if let Some(filter) = directory_filter
-            && let Some(q) = self.build_directory_filter(filter) {
-                must_clauses.push((Occur::Must, q));
-            }
+            && let Some(q) = self.build_directory_filter(filter)
+        {
+            must_clauses.push((Occur::Must, q));
+        }
 
         // Date filter
         if let Some(filter) = date_filter
-            && let Some(q) = self.build_date_filter(filter) {
-                must_clauses.push((Occur::Must, q));
-            }
+            && let Some(q) = self.build_date_filter(filter)
+        {
+            must_clauses.push((Occur::Must, q));
+        }
 
         let final_query: Box<dyn tantivy::query::Query> = if must_clauses.is_empty() {
             Box::new(AllQuery)

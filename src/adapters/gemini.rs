@@ -6,7 +6,7 @@ use chrono::NaiveDateTime;
 use serde_json::Value;
 
 use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 fn gemini_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".gemini/tmp")
@@ -80,9 +80,10 @@ impl GeminiAdapter {
     fn get_session_id_from_file(path: &Path) -> String {
         if let Ok(data) = fs::read(path)
             && let Ok(val) = serde_json::from_slice::<Value>(&data)
-                && let Some(id) = val.get("sessionId").and_then(Value::as_str) {
-                    return id.to_string();
-                }
+            && let Some(id) = val.get("sessionId").and_then(Value::as_str)
+        {
+            return id.to_string();
+        }
         // Fallback: extract from filename (session-YYYY-MM-DDTHH-mm-<id8>.json)
         path.file_stem()
             .and_then(|s| s.to_str())
@@ -102,10 +103,7 @@ impl GeminiAdapter {
 
         let val: Value = serde_json::from_slice(&data).ok()?;
 
-        let session_id = val
-            .get("sessionId")
-            .and_then(Value::as_str)?
-            .to_string();
+        let session_id = val.get("sessionId").and_then(Value::as_str)?.to_string();
 
         // Skip subagent sessions
         let kind = val.get("kind").and_then(Value::as_str).unwrap_or("main");
@@ -148,22 +146,24 @@ impl GeminiAdapter {
             if let Some(parts) = content.and_then(Value::as_array) {
                 for part in parts {
                     if let Some(text) = part.get("text").and_then(Value::as_str)
-                        && !text.is_empty() {
-                            messages.push(format!("{prefix}{text}"));
-                            has_text = true;
-                            if msg_type == "user" && first_user_text.is_empty() {
-                                first_user_text = text.to_string();
-                            }
+                        && !text.is_empty()
+                    {
+                        messages.push(format!("{prefix}{text}"));
+                        has_text = true;
+                        if msg_type == "user" && first_user_text.is_empty() {
+                            first_user_text = text.to_string();
                         }
-                }
-            } else if let Some(text) = content.and_then(Value::as_str)
-                && !text.is_empty() {
-                    messages.push(format!("{prefix}{text}"));
-                    has_text = true;
-                    if msg_type == "user" && first_user_text.is_empty() {
-                        first_user_text = text.to_string();
                     }
                 }
+            } else if let Some(text) = content.and_then(Value::as_str)
+                && !text.is_empty()
+            {
+                messages.push(format!("{prefix}{text}"));
+                has_text = true;
+                if msg_type == "user" && first_user_text.is_empty() {
+                    first_user_text = text.to_string();
+                }
+            }
 
             if has_text {
                 turn_count += 1;
@@ -259,14 +259,13 @@ impl AgentAdapter for GeminiAdapter {
                 Some((known_mtime, _)) => *mtime > *known_mtime + 0.001,
                 None => true,
             };
-            if needs_parse
-                && let Some(mut session) = Self::parse_session_file(path) {
-                    session.mtime = *mtime;
-                    if let Some(cb) = on_session {
-                        cb(&session);
-                    }
-                    new_or_modified.push(session);
+            if needs_parse && let Some(mut session) = Self::parse_session_file(path) {
+                session.mtime = *mtime;
+                if let Some(cb) = on_session {
+                    cb(&session);
                 }
+                new_or_modified.push(session);
+            }
         }
 
         let deleted: Vec<String> = known

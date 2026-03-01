@@ -98,7 +98,8 @@ impl App {
             }
             if let Some(ref dir) = self.directory_filter {
                 let lower = dir.to_lowercase();
-                self.filtered.retain(|s| s.directory.to_lowercase().contains(&lower));
+                self.filtered
+                    .retain(|s| s.directory.to_lowercase().contains(&lower));
             }
         } else {
             self.filtered = self.search_engine.search(

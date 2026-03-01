@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use chrono::DateTime;
 use serde_json::Value;
 
-use crate::adapter::{incremental_scan, AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback, incremental_scan};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 pub struct CodexAdapter {
     sessions_dir: PathBuf,
@@ -49,16 +49,18 @@ impl CodexAdapter {
                     continue;
                 }
                 if let Ok(val) = serde_json::from_slice::<Value>(line)
-                    && val.get("type").and_then(Value::as_str) == Some("session_meta") {
-                        if let Some(id) = val
-                            .get("payload")
-                            .and_then(|p| p.get("id"))
-                            .and_then(Value::as_str)
-                            && !id.is_empty() {
-                                return id.to_string();
-                            }
-                        break;
+                    && val.get("type").and_then(Value::as_str) == Some("session_meta")
+                {
+                    if let Some(id) = val
+                        .get("payload")
+                        .and_then(|p| p.get("id"))
+                        .and_then(Value::as_str)
+                        && !id.is_empty()
+                    {
+                        return id.to_string();
                     }
+                    break;
+                }
             }
         }
         // Fallback: filename stem
@@ -149,15 +151,17 @@ impl CodexAdapter {
                     let event_type = payload.get("type").and_then(Value::as_str).unwrap_or("");
                     if event_type == "user_message" {
                         if let Some(msg) = payload.get("message").and_then(Value::as_str)
-                            && !msg.is_empty() {
-                                messages.push(format!("» {msg}"));
-                                user_prompts.push(msg.to_string());
-                            }
+                            && !msg.is_empty()
+                        {
+                            messages.push(format!("» {msg}"));
+                            user_prompts.push(msg.to_string());
+                        }
                     } else if event_type == "agent_reasoning"
                         && let Some(text) = payload.get("text").and_then(Value::as_str)
-                            && !text.is_empty() {
-                                messages.push(format!("  {text}"));
-                            }
+                        && !text.is_empty()
+                    {
+                        messages.push(format!("  {text}"));
+                    }
                 }
                 _ => {}
             }

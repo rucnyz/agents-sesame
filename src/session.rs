@@ -44,9 +44,10 @@ pub fn truncate_title(text: &str, max_length: usize) -> String {
 
     // Try to break at last space for cleaner truncation
     if let Some(last_space) = truncated.rfind(' ')
-        && last_space > max_length / 2 {
-            return format!("{}...", &truncated[..last_space]);
-        }
+        && last_space > max_length / 2
+    {
+        return format!("{}...", &truncated[..last_space]);
+    }
     format!("{truncated}...")
 }
 

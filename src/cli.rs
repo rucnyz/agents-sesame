@@ -3,7 +3,10 @@ use clap::Parser;
 use crate::search::SessionSearch;
 
 #[derive(Parser)]
-#[command(name = "fr-rs", about = "Fast fuzzy finder for coding agent session history")]
+#[command(
+    name = "fr-rs",
+    about = "Fast fuzzy finder for coding agent session history"
+)]
 pub struct Cli {
     /// Search query
     pub query: Option<String>,
@@ -86,7 +89,10 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn apply_basic_filters(mut sessions: Vec<crate::session::Session>, cli: &Cli) -> Vec<crate::session::Session> {
+fn apply_basic_filters(
+    mut sessions: Vec<crate::session::Session>,
+    cli: &Cli,
+) -> Vec<crate::session::Session> {
     if let Some(ref agent) = cli.agent {
         sessions.retain(|s| s.agent == *agent);
     }
@@ -103,10 +109,7 @@ fn print_sessions(sessions: &[crate::session::Session]) {
     let total = sessions.len();
     let display_count = total.min(50);
 
-    println!(
-        "{:<10} {:<52} {:<37} ID",
-        "Agent", "Title", "Directory"
-    );
+    println!("{:<10} {:<52} {:<37} ID", "Agent", "Title", "Directory");
     println!("{}", "-".repeat(120));
 
     for session in sessions.iter().take(display_count) {

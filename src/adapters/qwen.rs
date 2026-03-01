@@ -6,7 +6,7 @@ use chrono::NaiveDateTime;
 use serde_json::Value;
 
 use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 fn qwen_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".qwen/tmp")
@@ -128,13 +128,14 @@ impl QwenAdapter {
 
                 for part in parts {
                     if let Some(text) = part.get("text").and_then(Value::as_str)
-                        && !text.is_empty() {
-                            messages.push(format!("{prefix}{text}"));
-                            has_text = true;
-                            if msg_type == "user" && first_user_text.is_empty() {
-                                first_user_text = text.to_string();
-                            }
+                        && !text.is_empty()
+                    {
+                        messages.push(format!("{prefix}{text}"));
+                        has_text = true;
+                        if msg_type == "user" && first_user_text.is_empty() {
+                            first_user_text = text.to_string();
                         }
+                    }
                 }
                 if has_text {
                     turn_count += 1;
@@ -158,10 +159,9 @@ impl QwenAdapter {
         let full_content = messages.join("\n\n");
 
         // Parse ISO timestamp or fallback to mtime
-        let timestamp = parse_iso_timestamp(&first_timestamp)
-            .or_else(|| {
-                chrono::DateTime::from_timestamp(mtime as i64, 0).map(|dt| dt.naive_utc())
-            })?;
+        let timestamp = parse_iso_timestamp(&first_timestamp).or_else(|| {
+            chrono::DateTime::from_timestamp(mtime as i64, 0).map(|dt| dt.naive_utc())
+        })?;
 
         Some(Session {
             id: session_id,
@@ -235,14 +235,13 @@ impl AgentAdapter for QwenAdapter {
                 Some((known_mtime, _)) => *mtime > *known_mtime + 0.001,
                 None => true,
             };
-            if needs_parse
-                && let Some(mut session) = Self::parse_session_file(path) {
-                    session.mtime = *mtime;
-                    if let Some(cb) = on_session {
-                        cb(&session);
-                    }
-                    new_or_modified.push(session);
+            if needs_parse && let Some(mut session) = Self::parse_session_file(path) {
+                session.mtime = *mtime;
+                if let Some(cb) = on_session {
+                    cb(&session);
                 }
+                new_or_modified.push(session);
+            }
         }
 
         let deleted: Vec<String> = known

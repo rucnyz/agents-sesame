@@ -6,8 +6,8 @@ use chrono::DateTime;
 use regex::Regex;
 use serde_json::Value;
 
-use crate::adapter::{incremental_scan, AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback, incremental_scan};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 pub struct CopilotAdapter {
     sessions_dir: PathBuf,
@@ -54,16 +54,18 @@ impl CopilotAdapter {
                     continue;
                 }
                 if let Ok(val) = serde_json::from_slice::<Value>(line)
-                    && val.get("type").and_then(Value::as_str) == Some("session.start") {
-                        if let Some(id) = val
-                            .get("data")
-                            .and_then(|d| d.get("sessionId"))
-                            .and_then(Value::as_str)
-                            && !id.is_empty() {
-                                return id.to_string();
-                            }
-                        break;
+                    && val.get("type").and_then(Value::as_str) == Some("session.start")
+                {
+                    if let Some(id) = val
+                        .get("data")
+                        .and_then(|d| d.get("sessionId"))
+                        .and_then(Value::as_str)
+                        && !id.is_empty()
+                    {
+                        return id.to_string();
                     }
+                    break;
+                }
             }
         }
         path.file_stem()
@@ -129,7 +131,10 @@ impl CopilotAdapter {
                     }
                 }
                 "user.message" => {
-                    let content = data_obj.get("content").and_then(Value::as_str).unwrap_or("");
+                    let content = data_obj
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     if !content.is_empty() {
                         messages.push(format!("» {content}"));
                         turn_count += 1;
@@ -139,7 +144,10 @@ impl CopilotAdapter {
                     }
                 }
                 "assistant.message" => {
-                    let content = data_obj.get("content").and_then(Value::as_str).unwrap_or("");
+                    let content = data_obj
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     if !content.is_empty() {
                         messages.push(format!("  {content}"));
                         turn_count += 1;
@@ -231,14 +239,15 @@ impl AgentAdapter for CopilotAdapter {
         let mut file_count = 0;
         let mut total_bytes = 0;
         if dir.is_dir()
-            && let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    if entry.path().extension().is_some_and(|e| e == "jsonl") {
-                        file_count += 1;
-                        total_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
-                    }
+            && let Ok(entries) = fs::read_dir(dir)
+        {
+            for entry in entries.flatten() {
+                if entry.path().extension().is_some_and(|e| e == "jsonl") {
+                    file_count += 1;
+                    total_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
                 }
             }
+        }
         RawAdapterStats {
             agent: "copilot-cli".to_string(),
             data_dir: dir.display().to_string(),

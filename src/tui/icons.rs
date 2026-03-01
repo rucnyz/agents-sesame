@@ -34,9 +34,10 @@ impl IconManager {
         for agent in agents {
             let icon_path = assets_dir.join(format!("{agent}.png"));
             if icon_path.exists()
-                && let Ok(img) = image::open(&icon_path) {
-                    icons.insert(agent.to_string(), img);
-                }
+                && let Ok(img) = image::open(&icon_path)
+            {
+                icons.insert(agent.to_string(), img);
+            }
         }
 
         Some(Self {

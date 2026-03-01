@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, NaiveDateTime};
 use serde_json::Value;
 
-use crate::adapter::{incremental_scan, AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback, incremental_scan};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 pub struct VibeAdapter {
     sessions_dir: PathBuf,
@@ -51,7 +51,11 @@ impl VibeAdapter {
             let session_id = if let Ok(data) = fs::read(&meta_file) {
                 serde_json::from_slice::<Value>(&data)
                     .ok()
-                    .and_then(|v| v.get("session_id").and_then(Value::as_str).map(String::from))
+                    .and_then(|v| {
+                        v.get("session_id")
+                            .and_then(Value::as_str)
+                            .map(String::from)
+                    })
                     .unwrap_or_else(|| name.to_string())
             } else {
                 name.to_string()
@@ -138,47 +142,49 @@ impl VibeAdapter {
         let mut first_user_content = String::new();
 
         if messages_file.exists()
-            && let Ok(data) = fs::read(&messages_file) {
-                for line in data.split(|&b| b == b'\n') {
-                    if line.is_empty() {
-                        continue;
+            && let Ok(data) = fs::read(&messages_file)
+        {
+            for line in data.split(|&b| b == b'\n') {
+                if line.is_empty() {
+                    continue;
+                }
+                let Ok(msg) = serde_json::from_slice::<Value>(line) else {
+                    continue;
+                };
+
+                let role = msg.get("role").and_then(Value::as_str).unwrap_or("");
+                if role == "system" {
+                    continue;
+                }
+
+                let prefix = if role == "user" { "» " } else { "  " };
+                let content = msg.get("content");
+
+                match content {
+                    Some(Value::String(text)) => {
+                        if !text.is_empty() {
+                            messages.push(format!("{prefix}{text}"));
+                            if role == "user" && first_user_content.is_empty() {
+                                first_user_content = text.clone();
+                            }
+                        }
                     }
-                    let Ok(msg) = serde_json::from_slice::<Value>(line) else {
-                        continue;
-                    };
-
-                    let role = msg.get("role").and_then(Value::as_str).unwrap_or("");
-                    if role == "system" {
-                        continue;
-                    }
-
-                    let prefix = if role == "user" { "» " } else { "  " };
-                    let content = msg.get("content");
-
-                    match content {
-                        Some(Value::String(text)) => {
-                            if !text.is_empty() {
+                    Some(Value::Array(parts)) => {
+                        for part in parts {
+                            if let Some(text) = part.get("text").and_then(Value::as_str)
+                                && !text.is_empty()
+                            {
                                 messages.push(format!("{prefix}{text}"));
                                 if role == "user" && first_user_content.is_empty() {
-                                    first_user_content = text.clone();
+                                    first_user_content = text.to_string();
                                 }
                             }
                         }
-                        Some(Value::Array(parts)) => {
-                            for part in parts {
-                                if let Some(text) = part.get("text").and_then(Value::as_str)
-                                    && !text.is_empty() {
-                                        messages.push(format!("{prefix}{text}"));
-                                        if role == "user" && first_user_content.is_empty() {
-                                            first_user_content = text.to_string();
-                                        }
-                                    }
-                            }
-                        }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
+        }
 
         let title = if !meta_title.is_empty() {
             meta_title

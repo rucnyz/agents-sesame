@@ -68,7 +68,12 @@ fn test_claude_resume_command() {
     );
     assert_eq!(
         adapter.get_resume_command(&session, true),
-        vec!["claude", "--dangerously-skip-permissions", "--resume", "ses-123"]
+        vec![
+            "claude",
+            "--dangerously-skip-permissions",
+            "--resume",
+            "ses-123"
+        ]
     );
 }
 

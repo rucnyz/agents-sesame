@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use chrono::DateTime;
 use serde_json::Value;
 
-use crate::adapter::{incremental_scan, AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback, incremental_scan};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 pub struct ClaudeAdapter {
     sessions_dir: PathBuf,
@@ -56,13 +56,12 @@ impl ClaudeAdapter {
                     continue;
                 }
                 let mtime = match file_entry.metadata() {
-                    Ok(m) => {
-                        m.modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs_f64())
-                            .unwrap_or(0.0)
-                    }
+                    Ok(m) => m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0),
                     Err(_) => continue,
                 };
                 files.insert(stem.to_string(), (path, mtime));
@@ -102,13 +101,12 @@ impl ClaudeAdapter {
                 "user" => {
                     // Extract directory from first user message
                     if directory.is_empty()
-                        && let Some(cwd) = val.get("cwd").and_then(Value::as_str) {
-                            directory = cwd.to_string();
-                        }
+                        && let Some(cwd) = val.get("cwd").and_then(Value::as_str)
+                    {
+                        directory = cwd.to_string();
+                    }
 
-                    let content = val
-                        .get("message")
-                        .and_then(|m| m.get("content"));
+                    let content = val.get("message").and_then(|m| m.get("content"));
 
                     let Some(content) = content else {
                         continue;
@@ -139,19 +137,19 @@ impl ClaudeAdapter {
                             for part in parts {
                                 let text = match part {
                                     Value::String(s) => Some(s.clone()),
-                                    Value::Object(_) => part
-                                        .get("text")
-                                        .and_then(Value::as_str)
-                                        .map(String::from),
+                                    Value::Object(_) => {
+                                        part.get("text").and_then(Value::as_str).map(String::from)
+                                    }
                                     _ => None,
                                 };
                                 if let Some(text) = text
-                                    && !text.is_empty() {
-                                        messages.push(format!("» {text}"));
-                                        if first_user_message.is_empty() && text.chars().count() > 4 {
-                                            first_user_message = text;
-                                        }
+                                    && !text.is_empty()
+                                {
+                                    messages.push(format!("» {text}"));
+                                    if first_user_message.is_empty() && text.chars().count() > 4 {
+                                        first_user_message = text;
                                     }
+                                }
                             }
                             if is_human {
                                 turn_count += 1;
@@ -161,9 +159,7 @@ impl ClaudeAdapter {
                     }
                 }
                 "assistant" => {
-                    let content = val
-                        .get("message")
-                        .and_then(|m| m.get("content"));
+                    let content = val.get("message").and_then(|m| m.get("content"));
 
                     let Some(content) = content else {
                         continue;
@@ -182,10 +178,8 @@ impl ClaudeAdapter {
                                 let text = match part {
                                     Value::String(s) => Some(s.as_str()),
                                     Value::Object(_) => {
-                                        let pt = part
-                                            .get("type")
-                                            .and_then(Value::as_str)
-                                            .unwrap_or("");
+                                        let pt =
+                                            part.get("type").and_then(Value::as_str).unwrap_or("");
                                         if pt == "text" {
                                             part.get("text").and_then(Value::as_str)
                                         } else {
@@ -195,10 +189,11 @@ impl ClaudeAdapter {
                                     _ => None,
                                 };
                                 if let Some(text) = text
-                                    && !text.is_empty() {
-                                        messages.push(format!("  {text}"));
-                                        has_text = true;
-                                    }
+                                    && !text.is_empty()
+                                {
+                                    messages.push(format!("  {text}"));
+                                    has_text = true;
+                                }
                             }
                         }
                         _ => {}
@@ -298,10 +293,7 @@ impl AgentAdapter for ClaudeAdapter {
         let mut total_bytes = 0;
 
         if dir.is_dir() {
-            for entry in walkdir::WalkDir::new(dir)
-                .into_iter()
-                .flatten()
-            {
+            for entry in walkdir::WalkDir::new(dir).into_iter().flatten() {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "jsonl")
                     && !path

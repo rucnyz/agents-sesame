@@ -115,10 +115,7 @@ fn build_preview_lines(
                     let code_line = msg_lines[i];
                     lines.push(Line::from(vec![
                         Span::styled("  ", Style::default()),
-                        Span::styled(
-                            code_line.to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        ),
+                        Span::styled(code_line.to_string(), Style::default().fg(Color::DarkGray)),
                     ]));
                     i += 1;
                 }
@@ -239,10 +236,11 @@ fn highlight_spans(text: &str, query: &str, base_color: Color) -> Vec<Span<'stat
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for m in matches {
         if let Some(last) = merged.last_mut()
-            && m.0 <= last.1 {
-                last.1 = last.1.max(m.1);
-                continue;
-            }
+            && m.0 <= last.1
+        {
+            last.1 = last.1.max(m.1);
+            continue;
+        }
         merged.push(m);
     }
 

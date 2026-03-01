@@ -7,7 +7,9 @@ use ratatui::widgets::{Block, Borders, StatefulWidget, Widget};
 use crate::config;
 use crate::session::Session;
 
-use super::utils::{format_directory, format_time_ago, get_age_color, pad_to_width, truncate_to_width};
+use super::utils::{
+    format_directory, format_time_ago, get_age_color, pad_to_width, truncate_to_width,
+};
 
 pub struct ResultsList<'a> {
     pub sessions: &'a [Session],
@@ -161,10 +163,8 @@ impl StatefulWidget for ResultsList<'_> {
                 .map(|c| c.badge)
                 .unwrap_or(session.agent.as_str());
 
-            let age_hours = now
-                .signed_duration_since(session.timestamp)
-                .num_seconds() as f64
-                / 3600.0;
+            let age_hours =
+                now.signed_duration_since(session.timestamp).num_seconds() as f64 / 3600.0;
             let date_color = get_age_color(age_hours);
 
             let title_display = truncate_to_width(&session.title, title_w);
@@ -183,7 +183,10 @@ impl StatefulWidget for ResultsList<'_> {
                     Style::default().fg(agent_color),
                 ),
                 Span::raw(" "),
-                Span::styled(pad_to_width(&title_display, title_w), Style::default().fg(Color::White)),
+                Span::styled(
+                    pad_to_width(&title_display, title_w),
+                    Style::default().fg(Color::White),
+                ),
                 Span::raw(" "),
             ];
 

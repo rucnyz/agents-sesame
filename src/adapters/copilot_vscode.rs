@@ -6,7 +6,7 @@ use chrono::DateTime;
 use serde_json::Value;
 
 use crate::adapter::{AgentAdapter, ErrorCallback, SessionCallback};
-use crate::session::{truncate_title, RawAdapterStats, Session};
+use crate::session::{RawAdapterStats, Session, truncate_title};
 
 fn vscode_storage_dir() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
@@ -45,38 +45,40 @@ impl CopilotVSCodeAdapter {
 
         // Empty window sessions
         if self.chat_sessions_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&self.chat_sessions_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        session_files.push((path, String::new()));
-                    }
+            && let Ok(entries) = fs::read_dir(&self.chat_sessions_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "json") {
+                    session_files.push((path, String::new()));
                 }
             }
+        }
 
         // Workspace-specific sessions
         if self.workspace_storage_dir.is_dir()
-            && let Ok(ws_entries) = fs::read_dir(&self.workspace_storage_dir) {
-                for ws_entry in ws_entries.flatten() {
-                    let ws_dir = ws_entry.path();
-                    if !ws_dir.is_dir() {
-                        continue;
-                    }
-                    let chat_dir = ws_dir.join("chatSessions");
-                    if !chat_dir.is_dir() {
-                        continue;
-                    }
-                    let ws_directory = Self::get_workspace_directory(&ws_dir);
-                    if let Ok(entries) = fs::read_dir(&chat_dir) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().is_some_and(|e| e == "json") {
-                                session_files.push((path, ws_directory.clone()));
-                            }
+            && let Ok(ws_entries) = fs::read_dir(&self.workspace_storage_dir)
+        {
+            for ws_entry in ws_entries.flatten() {
+                let ws_dir = ws_entry.path();
+                if !ws_dir.is_dir() {
+                    continue;
+                }
+                let chat_dir = ws_dir.join("chatSessions");
+                if !chat_dir.is_dir() {
+                    continue;
+                }
+                let ws_directory = Self::get_workspace_directory(&ws_dir);
+                if let Ok(entries) = fs::read_dir(&chat_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            session_files.push((path, ws_directory.clone()));
                         }
                     }
                 }
             }
+        }
 
         session_files
     }
@@ -85,11 +87,12 @@ impl CopilotVSCodeAdapter {
         let workspace_json = workspace_dir.join("workspace.json");
         if let Ok(data) = fs::read(&workspace_json)
             && let Ok(val) = serde_json::from_slice::<Value>(&data)
-                && let Some(folder) = val.get("folder").and_then(Value::as_str)
-                    && let Some(path) = folder.strip_prefix("file://") {
-                        // URL-decode the path
-                        return urldecode(path);
-                    }
+            && let Some(folder) = val.get("folder").and_then(Value::as_str)
+            && let Some(path) = folder.strip_prefix("file://")
+        {
+            // URL-decode the path
+            return urldecode(path);
+        }
         String::new()
     }
 
@@ -150,21 +153,23 @@ impl CopilotVSCodeAdapter {
 
             // Extract directory from content references
             if directory.is_empty()
-                && let Some(refs) = req.get("contentReferences").and_then(Value::as_array) {
-                    for r in refs {
-                        let fs_path = r
-                            .get("reference")
-                            .and_then(|rf| rf.get("uri"))
-                            .and_then(|u| u.get("fsPath"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if !fs_path.is_empty()
-                            && let Some(parent) = Path::new(fs_path).parent() {
-                                directory = parent.display().to_string();
-                                break;
-                            }
+                && let Some(refs) = req.get("contentReferences").and_then(Value::as_array)
+            {
+                for r in refs {
+                    let fs_path = r
+                        .get("reference")
+                        .and_then(|rf| rf.get("uri"))
+                        .and_then(|u| u.get("fsPath"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if !fs_path.is_empty()
+                        && let Some(parent) = Path::new(fs_path).parent()
+                    {
+                        directory = parent.display().to_string();
+                        break;
                     }
                 }
+            }
 
             // Assistant response
             if let Some(response) = req.get("response").and_then(Value::as_array) {
@@ -235,27 +240,29 @@ impl AgentAdapter for CopilotVSCodeAdapter {
     fn is_available(&self) -> bool {
         if self.chat_sessions_dir.is_dir()
             && let Ok(mut entries) = fs::read_dir(&self.chat_sessions_dir)
-                && entries.any(|e| {
-                    e.ok()
-                        .is_some_and(|e| e.path().extension().is_some_and(|x| x == "json"))
-                }) {
+            && entries.any(|e| {
+                e.ok()
+                    .is_some_and(|e| e.path().extension().is_some_and(|x| x == "json"))
+            })
+        {
+            return true;
+        }
+        if self.workspace_storage_dir.is_dir()
+            && let Ok(ws_entries) = fs::read_dir(&self.workspace_storage_dir)
+        {
+            for ws_entry in ws_entries.flatten() {
+                let chat_dir = ws_entry.path().join("chatSessions");
+                if chat_dir.is_dir()
+                    && let Ok(mut entries) = fs::read_dir(&chat_dir)
+                    && entries.any(|e| {
+                        e.ok()
+                            .is_some_and(|e| e.path().extension().is_some_and(|x| x == "json"))
+                    })
+                {
                     return true;
                 }
-        if self.workspace_storage_dir.is_dir()
-            && let Ok(ws_entries) = fs::read_dir(&self.workspace_storage_dir) {
-                for ws_entry in ws_entries.flatten() {
-                    let chat_dir = ws_entry.path().join("chatSessions");
-                    if chat_dir.is_dir()
-                        && let Ok(mut entries) = fs::read_dir(&chat_dir)
-                            && entries.any(|e| {
-                                e.ok().is_some_and(|e| {
-                                    e.path().extension().is_some_and(|x| x == "json")
-                                })
-                            }) {
-                                return true;
-                            }
-                }
             }
+        }
         false
     }
 
@@ -304,13 +311,12 @@ impl AgentAdapter for CopilotVSCodeAdapter {
                 Some((known_mtime, _)) => *mtime > *known_mtime + 0.001,
                 None => true,
             };
-            if needs_parse
-                && let Some(session) = Self::parse_session(path, ws_dir) {
-                    if let Some(cb) = on_session {
-                        cb(&session);
-                    }
-                    new_or_modified.push(session);
+            if needs_parse && let Some(session) = Self::parse_session(path, ws_dir) {
+                if let Some(cb) = on_session {
+                    cb(&session);
                 }
+                new_or_modified.push(session);
+            }
         }
 
         let deleted: Vec<String> = known
@@ -356,8 +362,7 @@ fn urldecode(s: &str) -> String {
             let h1 = chars.next().unwrap_or(b'0');
             let h2 = chars.next().unwrap_or(b'0');
             let hex = [h1, h2];
-            if let Ok(decoded) = u8::from_str_radix(std::str::from_utf8(&hex).unwrap_or("00"), 16)
-            {
+            if let Ok(decoded) = u8::from_str_radix(std::str::from_utf8(&hex).unwrap_or("00"), 16) {
                 result.push(decoded as char);
             }
         } else {
