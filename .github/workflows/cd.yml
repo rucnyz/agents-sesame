@@ -20,6 +20,7 @@ jobs:
         with:
           prerelease: false
           generateReleaseNotes: true
+          allowUpdates: true
 
   build-release:
     name: Build ${{ matrix.target }}
