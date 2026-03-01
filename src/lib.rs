@@ -7,7 +7,7 @@ pub mod search;
 pub mod session;
 
 mod cli;
-mod tui;
+pub(crate) mod tui;
 mod update;
 
 pub use cli::run;

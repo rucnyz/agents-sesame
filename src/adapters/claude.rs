@@ -120,7 +120,7 @@ impl ClaudeAdapter {
                             }
                             if !text.is_empty() {
                                 messages.push(format!("» {text}"));
-                                if first_user_message.is_empty() && text.chars().count() > 4 {
+                                if first_user_message.is_empty() {
                                     first_user_message = text.clone();
                                 }
                                 turn_count += 1;
@@ -146,7 +146,7 @@ impl ClaudeAdapter {
                                     && !text.is_empty()
                                 {
                                     messages.push(format!("» {text}"));
-                                    if first_user_message.is_empty() && text.chars().count() > 4 {
+                                    if first_user_message.is_empty() {
                                         first_user_message = text;
                                     }
                                 }

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Theme — fr-rs</title>
+<style>
+  :root {
+    --bg: #0d1117; --fg: #c9d1d9; --accent: #e87b35; --link: #58a6ff;
+    --code-bg: #161b22; --border: #30363d; --th-bg: #161b22; --kbd-bg: #21262d;
+    --h2-border: #21262d;
+  }
+  [data-theme="light"] {
+    --bg: #ffffff; --fg: #24292f; --accent: #d35400; --link: #0969da;
+    --code-bg: #f6f8fa; --border: #d0d7de; --th-bg: #f6f8fa; --kbd-bg: #eff1f3;
+    --h2-border: #d0d7de;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ffffff; --fg: #24292f; --accent: #d35400; --link: #0969da;
+      --code-bg: #f6f8fa; --border: #d0d7de; --th-bg: #f6f8fa; --kbd-bg: #eff1f3;
+      --h2-border: #d0d7de;
+    }
+  }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--fg); line-height: 1.6; transition: background 0.2s, color 0.2s; }
+  h1 { color: var(--accent); }
+  h2 { color: var(--link); border-bottom: 1px solid var(--h2-border); padding-bottom: 0.3em; }
+  h3 { color: var(--fg); }
+  code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--th-bg); }
+  a { color: var(--link); }
+  nav { margin-bottom: 2rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  nav a { margin-right: 1.5rem; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav .brand { color: var(--accent); font-weight: bold; }
+  .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 4px; border: 1px solid var(--border); }
+  .theme-toggle { position: fixed; top: 1rem; right: 1rem; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 1.2em; color: var(--fg); transition: background 0.2s; }
+  .theme-toggle:hover { opacity: 0.8; }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode" aria-label="Toggle theme">
+  <span id="theme-icon"></span>
+</button>
+
+<nav>
+  <a href="index.html" class="brand">fr-rs</a>
+  <a href="integrations.html">Integrations</a>
+  <a href="theme.html">Theme</a>
+</nav>
+
+<h1>Material You Theme</h1>
+<p>fr-rs uses <a href="https://m3.material.io/styles/color/roles">Material You color roles</a> for its TUI theme. All colors are configurable via the <code>[theme]</code> section in <code>~/.config/rust-resume/config.toml</code>.</p>
+
+<h2>Color Roles</h2>
+
+<table>
+<tr><th>Role</th><th>Controls</th><th>Default</th></tr>
+<tr>
+  <td><code>primary</code></td>
+  <td>Focused borders, title bar brand, footer key highlights, search box border</td>
+  <td><span class="swatch" style="background:#E87B35"></span><code>#E87B35</code></td>
+</tr>
+<tr>
+  <td><code>on_surface</code></td>
+  <td>Normal text, query text, active sort headers, title column text</td>
+  <td><code>White</code></td>
+</tr>
+<tr>
+  <td><code>on_surface_variant</code></td>
+  <td>Dim text, inactive borders, metadata (directory, turns), search prompt, placeholders, scrollbar thumb</td>
+  <td><code>DarkGray</code></td>
+</tr>
+<tr>
+  <td><code>surface_variant</code></td>
+  <td>Selected row background</td>
+  <td><span class="swatch" style="background:#28283C"></span><code>#28283C</code></td>
+</tr>
+<tr>
+  <td><code>surface_container</code></td>
+  <td>Scrollbar track</td>
+  <td><span class="swatch" style="background:#3C3C3C"></span><code>#3C3C3C</code></td>
+</tr>
+<tr>
+  <td><code>secondary</code></td>
+  <td>User message prefix (<code>&raquo;</code>), project scope label</td>
+  <td><code>Cyan</code></td>
+</tr>
+<tr>
+  <td><code>tertiary</code></td>
+  <td>Local scope label, loading indicator, status messages</td>
+  <td><span class="swatch" style="background:#64FF64"></span><code>#64FF64</code></td>
+</tr>
+<tr>
+  <td><code>primary_container</code></td>
+  <td>Search highlight match background (reserved)</td>
+  <td><code>Yellow</code></td>
+</tr>
+<tr>
+  <td><code>error</code></td>
+  <td>Error messages (reserved)</td>
+  <td><code>Red</code></td>
+</tr>
+</table>
+
+<h2>Example Config</h2>
+
+<pre><code>[theme]
+primary = "#E87B35"
+on_surface = "#FFFFFF"
+on_surface_variant = "#808080"
+surface_variant = "#28283C"
+surface_container = "#3C3C3C"
+secondary = "#64C8FF"
+tertiary = "#64FF64"
+primary_container = "#FFFF00"
+error = "#FF0000"</code></pre>
+
+<p>All fields are optional. Omitted fields use the built-in defaults shown above. Values must be 6-digit hex colors with or without <code>#</code> prefix.</p>
+
+<h2>What's Not Themed</h2>
+
+<p>These colors are intentionally hardcoded and not part of the theme system:</p>
+<ul>
+  <li><strong>Age gradient</strong> (date column): green &rarr; yellow &rarr; orange &rarr; gray based on session age. These are data visualization colors.</li>
+  <li><strong>Per-agent colors</strong>: Each agent (Claude, Codex, etc.) has a brand color defined in the agent registry. These are identity colors, not theme colors.</li>
+</ul>
+
+<h2>Auto-Generate with matugen</h2>
+
+<p>Use <a href="https://github.com/InioX/matugen">matugen</a> to generate a Material You theme from your wallpaper. See the <a href="integrations.html#matugen">Integrations</a> page for setup instructions.</p>
+
+<p><a href="https://github.com/rucnyz/rust-resume">GitHub</a></p>
+
+<script>
+function getPreferred() {
+  const saved = localStorage.getItem('theme');
+  if (saved) return saved;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-icon').textContent = t === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || getPreferred();
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+}
+applyTheme(getPreferred());
+</script>
+</body>
+</html>

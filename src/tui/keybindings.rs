@@ -20,6 +20,7 @@ pub enum Action {
     CycleDirectoryScope,
     CycleAgentFilterForward,
     CycleAgentFilterBackward,
+    RefreshSessions,
 
     // Results-focused (only fire when results pane focused)
     NavigateDown,
@@ -65,8 +66,13 @@ impl KeyCombo {
     }
 
     /// Create from a crossterm KeyEvent, keeping only CONTROL and SHIFT bits.
+    /// Normalizes BackTab by stripping SHIFT (BackTab already implies Shift+Tab).
     pub fn from_key_event(key: &KeyEvent) -> Self {
-        let mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        let mut mods = key.modifiers & (KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        // BackTab already implies Shift+Tab; strip SHIFT to match the parsed form
+        if key.code == KeyCode::BackTab {
+            mods &= !KeyModifiers::SHIFT;
+        }
         Self {
             code: key.code,
             modifiers: mods,
@@ -140,6 +146,7 @@ fn action_from_str(name: &str) -> Option<Action> {
         "cycle_directory_scope" => Some(Action::CycleDirectoryScope),
         "cycle_agent_filter_forward" => Some(Action::CycleAgentFilterForward),
         "cycle_agent_filter_backward" => Some(Action::CycleAgentFilterBackward),
+        "refresh_sessions" => Some(Action::RefreshSessions),
         "navigate_down" => Some(Action::NavigateDown),
         "navigate_up" => Some(Action::NavigateUp),
         "page_down" => Some(Action::PageDown),
@@ -266,6 +273,7 @@ impl KeyBindings {
                 Action::CycleAgentFilterBackward,
                 vec![k(KeyCode::BackTab, none)],
             ),
+            (Action::RefreshSessions, vec![k(KeyCode::Char('r'), ctrl)]),
             // Results-focused
             (Action::NavigateDown, vec![k(KeyCode::Down, none)]),
             (Action::NavigateUp, vec![k(KeyCode::Up, none)]),

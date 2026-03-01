@@ -201,6 +201,11 @@ impl SessionSearch {
             .collect()
     }
 
+    /// Look up a session by its ID.
+    pub fn get_session_by_id(&self, id: &str) -> Option<&Session> {
+        self.sessions_by_id.get(id)
+    }
+
     /// Get the resume command for a session.
     pub fn get_resume_command(&self, session: &Session, yolo: bool) -> Vec<String> {
         for adapter in &self.adapters {

@@ -41,6 +41,12 @@ fr-rs --list 'niri'            # Search and list
 fr-rs --agent claude --list    # Filter by agent
 fr-rs --rebuild --list         # Force rebuild index
 fr-rs --stats                  # Show index stats
+
+# Scriptable CLI (for fzf, television, pipes)
+fr-rs --list --format=tsv      # Tab-delimited output
+fr-rs --list --format=json     # JSON lines (one object per line)
+fr-rs --preview <session-id>   # Print session content to stdout
+fr-rs --resume <session-id>    # Resume session directly by ID
 ```
 
 ## Keybindings
@@ -77,6 +83,71 @@ dir = "~/.claude/projects"
 
 [agents.opencode]
 db = "~/.local/share/opencode/opencode.db"
+```
+
+### Theme (Material You)
+
+Customize TUI colors with a `[theme]` section using Material You role names:
+
+```toml
+[theme]
+primary = "#E87B35"              # accent: borders, title, footer keys
+on_surface = "#FFFFFF"           # normal text
+on_surface_variant = "#808080"   # dim text, inactive borders
+surface_variant = "#28283C"      # selected row background
+surface_container = "#3C3C3C"    # scrollbar track
+secondary = "#64C8FF"            # secondary accent (user message prefix, project scope)
+tertiary = "#64FF64"             # tertiary accent (local scope, loading, status)
+primary_container = "#FFFF00"    # search highlight match
+error = "#FF0000"                # error color
+```
+
+All fields are optional — unset values use built-in defaults.
+
+## Integrations
+
+### fzf
+
+```bash
+fr-rs --list --format=tsv | fzf --delimiter='\t' --with-nth=2,3,4,5,6 \
+  --preview='fr-rs --preview {1}' \
+  --bind='enter:become(fr-rs --resume {1})'
+```
+
+### television
+
+Copy the cable channel config to your television config:
+
+```sh
+cp docs/television-channel.toml ~/.config/television/cable/fr-rs.toml
+```
+
+Then run:
+
+```sh
+tv fr-rs
+```
+
+### matugen (auto-theme from wallpaper)
+
+1. Copy the template:
+
+```sh
+cp docs/matugen-template.toml ~/.config/matugen/templates/fr-rs.toml
+```
+
+2. Add to your matugen config (`~/.config/matugen/config.toml`):
+
+```toml
+[templates.fr-rs]
+input_path = "~/.config/matugen/templates/fr-rs.toml"
+output_path = "~/.config/rust-resume/config.toml"
+```
+
+3. Run matugen — fr-rs will pick up the generated theme on next launch:
+
+```sh
+matugen image /path/to/wallpaper.jpg
 ```
 
 ## License

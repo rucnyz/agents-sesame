@@ -4,6 +4,7 @@ pub mod icons;
 pub mod keybindings;
 pub mod preview;
 pub mod results_list;
+pub mod theme;
 pub mod utils;
 
 use std::io;
@@ -16,7 +17,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tui_scrollbar::{GlyphSet, ScrollBar, ScrollLengths};
@@ -25,10 +26,48 @@ use app::{App, FocusedPane};
 use filter_bar::FilterBar;
 use preview::Preview;
 use results_list::ResultsList;
+use theme::Theme;
 
 pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
+    // Check if this is the first run (no index cache)
+    let index_dir = crate::config::index_dir();
+    let first_run = !index_dir.exists();
+
     // Load icons BEFORE entering alternate screen (queries terminal for protocol support)
     let icon_manager = icons::IconManager::new(&icons::assets_dir());
+
+    let cfg = crate::config::AppConfig::load();
+    let kb = keybindings::KeyBindings::load(&cfg.keybindings);
+    let theme = Theme::from_config(&cfg.theme);
+
+    // On first run, block until at least one adapter finishes before entering TUI.
+    // This way the user sees the progress message in the normal terminal.
+    let preloaded = if first_run {
+        use crate::search::{LoadingMsg, SessionSearch};
+        eprint!("Building session index for the first time, this may take a moment...");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut engine = SessionSearch::new();
+            engine.load_progressive(false, &tx);
+            let _ = tx.send(LoadingMsg::Done(Box::new(engine)));
+        });
+        // Wait for the first batch of sessions (one adapter completed)
+        let mut first_sessions = Vec::new();
+        let mut done_engine = None;
+        match rx.recv() {
+            Ok(LoadingMsg::Sessions(sessions)) => {
+                first_sessions = sessions;
+            }
+            Ok(LoadingMsg::Done(engine)) => {
+                done_engine = Some(engine);
+            }
+            Err(_) => {}
+        }
+        eprintln!(" done.");
+        Some((first_sessions, done_engine, rx))
+    } else {
+        None
+    };
 
     // Setup terminal
     enable_raw_mode()?;
@@ -37,16 +76,28 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let cfg = crate::config::AppConfig::load();
-    let kb = keybindings::KeyBindings::load(&cfg.keybindings);
-
-    let mut app = App::new(yolo, kb);
+    let mut app = App::new(yolo, kb, theme);
     app.icons = icon_manager;
     if let Some(dir) = directory {
         app.directory_filter = Some(dir.to_string());
         app.directory_scope = app::DirectoryScope::Local;
     }
-    app.start_loading();
+
+    if let Some((sessions, done_engine, rx)) = preloaded {
+        // Seed TUI with pre-loaded sessions from the first-run wait
+        app.sessions = sessions;
+        app.update_agent_counts();
+        app.apply_filter();
+        if let Some(engine) = done_engine {
+            app.search_engine = *engine;
+        } else {
+            // Still loading — hand over the channel
+            app.loading = true;
+            app.loading_rx = Some(rx);
+        }
+    } else {
+        app.start_loading();
+    };
 
     let result = run_loop(&mut terminal, &mut app);
 
@@ -152,40 +203,43 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 }
 
 fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
     let count = app.filtered.len();
     let total = app.total_count;
-    let sort_label = if app.sort_by_time {
-        "time"
-    } else {
-        "relevance"
+    let sort_label = match app.sort_column {
+        app::SortColumn::Date => "date",
+        app::SortColumn::Agent => "agent",
+        app::SortColumn::Title => "title",
+        app::SortColumn::Directory => "directory",
+        app::SortColumn::Turns => "turns",
     };
 
     let mut spans = vec![Span::styled(
         " fr-rs ",
         Style::default()
-            .fg(Color::Rgb(232, 123, 53))
+            .fg(theme.primary)
             .add_modifier(Modifier::BOLD),
     )];
 
     if app.loading {
         spans.push(Span::styled(
             "  Loading sessions...",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.tertiary),
         ));
     } else {
         spans.push(Span::styled(
             format!("  {count}/{total} sessions"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.on_surface_variant),
         ));
         spans.push(Span::styled(
             format!("  sort: {sort_label}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.on_surface_variant),
         ));
         if app.directory_filter.is_some() {
             let (label, color) = match app.directory_scope {
-                app::DirectoryScope::Local => ("local", Color::Rgb(100, 255, 100)),
-                app::DirectoryScope::Project => ("project", Color::Rgb(100, 200, 255)),
-                app::DirectoryScope::Global => ("global", Color::DarkGray),
+                app::DirectoryScope::Local => ("local", theme.tertiary),
+                app::DirectoryScope::Project => ("project", theme.secondary),
+                app::DirectoryScope::Global => ("global", theme.on_surface_variant),
             };
             spans.push(Span::styled(
                 format!("  scope: {label}"),
@@ -198,7 +252,7 @@ fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
         let mut s = spans;
         s.push(Span::styled(
             format!("  {msg}"),
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme.tertiary),
         ));
         f.render_widget(Line::from(s), area);
     } else {
@@ -207,30 +261,37 @@ fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
 }
 
 fn draw_search_box(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(232, 123, 53)))
+        .border_style(Style::default().fg(theme.primary))
         .title(" Search ");
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let mut spans = vec![Span::styled("/ ", Style::default().fg(Color::DarkGray))];
+    let mut spans = vec![Span::styled(
+        "/ ",
+        Style::default().fg(theme.on_surface_variant),
+    )];
 
     if app.query.is_empty() {
         spans.push(Span::styled(
             "Type to search sessions...",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.on_surface_variant),
         ));
     } else {
-        spans.push(Span::styled(&app.query, Style::default().fg(Color::White)));
+        spans.push(Span::styled(
+            &app.query,
+            Style::default().fg(theme.on_surface),
+        ));
     }
 
     if let Some(dur) = app.last_search_time {
         let ms = dur.as_millis();
         spans.push(Span::styled(
             format!("  ({ms}ms)"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.on_surface_variant),
         ));
     }
 
@@ -254,11 +315,15 @@ fn draw_filter_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
         active: app.agent_filter.as_deref(),
         counts: &app.agent_counts,
         total: app.total_count,
+        theme: &app.theme,
     };
     f.render_widget(filter_bar, area);
 }
 
 fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
+    // Copy theme colors needed for scrollbars to avoid borrow conflicts with &mut app
+    let sb_track = app.theme.surface_container;
+    let sb_thumb = app.theme.on_surface_variant;
     let results_area;
 
     if app.show_preview {
@@ -287,6 +352,9 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             sessions: &app.filtered,
             query: &app.query,
             focused: app.focused_pane == FocusedPane::Results,
+            sort_column: app.sort_column,
+            sort_direction: app.sort_direction,
+            theme: &app.theme,
         };
         f.render_stateful_widget(results, chunks[0], &mut app.results_state);
 
@@ -303,6 +371,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             total_lines: &mut total_lines,
             first_match_row: &mut first_match_row,
             focused: app.focused_pane == FocusedPane::Preview,
+            theme: &app.theme,
         };
         f.render_widget(preview, chunks[1]);
 
@@ -333,8 +402,8 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             })
             .offset(app.preview_scroll as usize)
             .glyph_set(GlyphSet::unicode())
-            .track_style(Style::default().fg(Color::Rgb(60, 60, 60)))
-            .thumb_style(Style::default().fg(Color::DarkGray));
+            .track_style(Style::default().fg(sb_track))
+            .thumb_style(Style::default().fg(sb_thumb));
             f.render_widget(&scrollbar, sb_area);
             app.preview_scrollbar = Some(scrollbar);
             app.preview_sb_area = sb_area;
@@ -356,6 +425,9 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             sessions: &app.filtered,
             query: &app.query,
             focused: true, // always focused when preview hidden
+            sort_column: app.sort_column,
+            sort_direction: app.sort_direction,
+            theme: &app.theme,
         };
         f.render_stateful_widget(results, area, &mut app.results_state);
     }
@@ -375,8 +447,8 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         })
         .offset(app.results_state.offset)
         .glyph_set(GlyphSet::unicode())
-        .track_style(Style::default().fg(Color::Rgb(60, 60, 60)))
-        .thumb_style(Style::default().fg(Color::DarkGray));
+        .track_style(Style::default().fg(sb_track))
+        .thumb_style(Style::default().fg(sb_thumb));
         f.render_widget(&scrollbar, sb_area);
         app.results_scrollbar = Some(scrollbar);
         app.results_sb_area = sb_area;
@@ -476,8 +548,9 @@ fn draw_preview_icons(
 }
 
 fn draw_footer(f: &mut ratatui::Frame, area: Rect, app: &App) {
-    let key = Style::default().fg(Color::Rgb(232, 123, 53));
-    let dim = Style::default().fg(Color::DarkGray);
+    let theme = &app.theme;
+    let key = Style::default().fg(theme.primary);
+    let dim = Style::default().fg(theme.on_surface_variant);
 
     let spans = if app.focused_pane == FocusedPane::Preview {
         vec![

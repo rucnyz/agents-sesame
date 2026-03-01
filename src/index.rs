@@ -325,7 +325,6 @@ impl TantivyIndex {
 
         // Text query (hybrid exact + fuzzy)
         if !query_text.is_empty()
-            && !sort_by_time
             && let Some(q) = self.build_hybrid_query(index, query_text)
         {
             must_clauses.push((Occur::Must, q));

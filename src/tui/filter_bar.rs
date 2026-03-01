@@ -9,6 +9,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::config;
 
+use super::theme::Theme;
+
 /// Order of agent filter keys (None = "All").
 const FILTER_ORDER: &[&str] = &[
     "claude",
@@ -27,10 +29,12 @@ pub struct FilterBar<'a> {
     pub active: Option<&'a str>,
     pub counts: &'a HashMap<String, usize>,
     pub total: usize,
+    pub theme: &'a Theme,
 }
 
 impl Widget for FilterBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let theme = self.theme;
         let mut spans = Vec::new();
 
         // "All" button
@@ -38,10 +42,10 @@ impl Widget for FilterBar<'_> {
         let all_style = if self.active.is_none() {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::White)
+                .bg(theme.on_surface)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme.on_surface_variant)
         };
         spans.push(Span::styled(all_label, all_style));
         spans.push(Span::raw(" "));
@@ -55,7 +59,7 @@ impl Widget for FilterBar<'_> {
 
             let color = config::get_agent_config(agent)
                 .map(|c| parse_hex_color(c.color))
-                .unwrap_or(Color::White);
+                .unwrap_or(theme.on_surface);
 
             let badge = config::get_agent_config(agent)
                 .map(|c| c.badge)

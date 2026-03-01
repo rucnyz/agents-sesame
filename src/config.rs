@@ -159,6 +159,8 @@ pub struct AppConfig {
     pub agents: HashMap<String, AgentPathConfig>,
     #[serde(default)]
     pub keybindings: HashMap<String, KeyOrKeys>,
+    #[serde(default)]
+    pub theme: Option<crate::tui::theme::ThemeConfig>,
 }
 
 /// Per-agent path configuration. All fields optional.

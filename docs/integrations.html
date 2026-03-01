@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integrations — fr-rs</title>
+<style>
+  :root {
+    --bg: #0d1117; --fg: #c9d1d9; --accent: #e87b35; --link: #58a6ff;
+    --code-bg: #161b22; --border: #30363d; --th-bg: #161b22; --kbd-bg: #21262d;
+    --h2-border: #21262d;
+  }
+  [data-theme="light"] {
+    --bg: #ffffff; --fg: #24292f; --accent: #d35400; --link: #0969da;
+    --code-bg: #f6f8fa; --border: #d0d7de; --th-bg: #f6f8fa; --kbd-bg: #eff1f3;
+    --h2-border: #d0d7de;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ffffff; --fg: #24292f; --accent: #d35400; --link: #0969da;
+      --code-bg: #f6f8fa; --border: #d0d7de; --th-bg: #f6f8fa; --kbd-bg: #eff1f3;
+      --h2-border: #d0d7de;
+    }
+  }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--fg); line-height: 1.6; transition: background 0.2s, color 0.2s; }
+  h1 { color: var(--accent); }
+  h2 { color: var(--link); border-bottom: 1px solid var(--h2-border); padding-bottom: 0.3em; }
+  h3 { color: var(--fg); }
+  code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--th-bg); }
+  a { color: var(--link); }
+  nav { margin-bottom: 2rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  nav a { margin-right: 1.5rem; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  nav .brand { color: var(--accent); font-weight: bold; }
+  .theme-toggle { position: fixed; top: 1rem; right: 1rem; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 1.2em; color: var(--fg); transition: background 0.2s; }
+  .theme-toggle:hover { opacity: 0.8; }
+  .step { margin: 0.5rem 0; padding-left: 1.5rem; }
+  .step::before { content: attr(data-n) ". "; font-weight: bold; color: var(--accent); margin-left: -1.5rem; }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode" aria-label="Toggle theme">
+  <span id="theme-icon"></span>
+</button>
+
+<nav>
+  <a href="index.html" class="brand">fr-rs</a>
+  <a href="integrations.html">Integrations</a>
+  <a href="theme.html">Theme</a>
+</nav>
+
+<h1>Integrations</h1>
+<p>fr-rs exposes scriptable CLI flags (<code>--preview</code>, <code>--resume</code>, <code>--format</code>) that make it easy to integrate with external tools.</p>
+
+<h2>fzf</h2>
+
+<p>Pipe session list into fzf with preview and resume-on-enter:</p>
+
+<pre><code>fr-rs --list --format=tsv | fzf --delimiter='\t' --with-nth=2,3,4,5,6 \
+  --preview='fr-rs --preview {1}' \
+  --bind='enter:become(fr-rs --resume {1})'</code></pre>
+
+<h3>How it works</h3>
+<table>
+<tr><th>Flag</th><th>Purpose</th></tr>
+<tr><td><code>--format=tsv</code></td><td>Tab-delimited output: ID, Agent, Title, Directory, Turns, Date</td></tr>
+<tr><td><code>--with-nth=2,3,4,5,6</code></td><td>Hide the ID column (field 1) from display, show Agent through Date</td></tr>
+<tr><td><code>--preview='fr-rs --preview {1}'</code></td><td>Show full session content in fzf preview pane (field 1 = session ID)</td></tr>
+<tr><td><code>--bind='enter:become(...)'</code></td><td>On Enter, replace fzf process with <code>fr-rs --resume</code> to resume the session</td></tr>
+</table>
+
+<p>Add to your shell config as a function or alias:</p>
+<pre><code># fish
+function frs
+  fr-rs --list --format=tsv | fzf --delimiter='\t' --with-nth=2,3,4,5,6 \
+    --preview='fr-rs --preview {1}' \
+    --bind='enter:become(fr-rs --resume {1})'
+end
+
+# bash/zsh
+frs() {
+  fr-rs --list --format=tsv | fzf --delimiter='\t' --with-nth=2,3,4,5,6 \
+    --preview='fr-rs --preview {1}' \
+    --bind='enter:become(fr-rs --resume {1})'
+}</code></pre>
+
+<h2>television</h2>
+
+<p><a href="https://github.com/alexpasmantier/television">television</a> is a fast TUI fuzzy finder. fr-rs ships a cable channel config for it.</p>
+
+<h3>Setup</h3>
+
+<p class="step" data-n="1">Copy the channel config:</p>
+<pre><code>cp docs/television-channel.toml ~/.config/television/cable/fr-rs.toml</code></pre>
+
+<p class="step" data-n="2">Launch:</p>
+<pre><code>tv fr-rs</code></pre>
+
+<h3>Channel config</h3>
+<pre><code>[[cable_channel]]
+name = "fr-rs"
+source_command = "fr-rs --list --format=tsv"
+preview_command = "fr-rs --preview {0}"
+preview_delimiter = "\t"</code></pre>
+
+<h2>matugen</h2>
+
+<p><a href="https://github.com/InioX/matugen">matugen</a> generates Material You color schemes from wallpaper images. fr-rs ships a template that auto-generates a theme config.</p>
+
+<h3>Setup</h3>
+
+<p class="step" data-n="1">Copy the template:</p>
+<pre><code>cp docs/matugen-template.toml ~/.config/matugen/templates/fr-rs.toml</code></pre>
+
+<p class="step" data-n="2">Add to your matugen config (<code>~/.config/matugen/config.toml</code>):</p>
+<pre><code>[templates.fr-rs]
+input_path = "~/.config/matugen/templates/fr-rs.toml"
+output_path = "~/.config/rust-resume/config.toml"</code></pre>
+
+<p class="step" data-n="3">Generate theme from a wallpaper:</p>
+<pre><code>matugen image /path/to/wallpaper.jpg</code></pre>
+
+<p>This writes a <code>[theme]</code> section to <code>~/.config/rust-resume/config.toml</code>. fr-rs picks it up on next launch. See the <a href="theme.html">Theme</a> page for color role details.</p>
+
+<h3>Pipeline</h3>
+<pre><code>wallpaper.jpg → matugen → config.toml [theme] section → fr-rs reads on startup</code></pre>
+
+<h2>JSON + jq</h2>
+
+<p>Use <code>--format=json</code> for structured output (one JSON object per line):</p>
+
+<pre><code># Count sessions per agent
+fr-rs --list --format=json | jq -s 'group_by(.agent) | map({agent: .[0].agent, count: length})'
+
+# Find sessions with most turns
+fr-rs --list --format=json | jq -s 'sort_by(-.turns) | .[0:5]'
+
+# Get directories of recent Claude sessions
+fr-rs --list --agent claude --format=json | jq -r '.directory' | head -10</code></pre>
+
+<p><a href="https://github.com/rucnyz/rust-resume">GitHub</a></p>
+
+<script>
+function getPreferred() {
+  const saved = localStorage.getItem('theme');
+  if (saved) return saved;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme-icon').textContent = t === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || getPreferred();
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+}
+applyTheme(getPreferred());
+</script>
+</body>
+</html>

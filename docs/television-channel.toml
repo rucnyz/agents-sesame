@@ -1,0 +1,9 @@
+# Television cable channel config for fr-rs
+# Copy to ~/.config/television/cable/fr-rs.toml
+# Then: tv fr-rs
+
+[[cable_channel]]
+name = "fr-rs"
+source_command = "fr-rs --list --format=tsv"
+preview_command = "fr-rs --preview {0}"
+preview_delimiter = "\t"

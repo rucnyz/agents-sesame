@@ -11,13 +11,28 @@ use crate::search::{LoadingMsg, SessionSearch};
 use crate::session::Session;
 
 use super::icons::IconManager;
-
 use super::results_list::ResultsState;
+use super::theme::Theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FocusedPane {
     Results,
     Preview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Agent,
+    Title,
+    Directory,
+    Turns,
+    Date,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,7 +57,8 @@ pub struct App {
     pub agent_filter: Option<String>,
     pub agent_counts: HashMap<String, usize>,
     pub total_count: usize,
-    pub sort_by_time: bool,
+    pub sort_column: SortColumn,
+    pub sort_direction: SortDirection,
     pub directory_filter: Option<String>,
     /// Directory scope mode (Local/Project/Global).
     pub directory_scope: DirectoryScope,
@@ -91,10 +107,12 @@ pub struct App {
     pub loading_rx: Option<std::sync::mpsc::Receiver<LoadingMsg>>,
     /// Configurable keybindings.
     pub keybindings: KeyBindings,
+    /// Resolved theme colors.
+    pub theme: Theme,
 }
 
 impl App {
-    pub fn new(yolo: bool, keybindings: KeyBindings) -> Self {
+    pub fn new(yolo: bool, keybindings: KeyBindings, theme: Theme) -> Self {
         Self {
             query: String::new(),
             cursor_pos: 0,
@@ -107,7 +125,8 @@ impl App {
             agent_filter: None,
             agent_counts: HashMap::new(),
             total_count: 0,
-            sort_by_time: false,
+            sort_column: SortColumn::Date,
+            sort_direction: SortDirection::Desc,
             directory_filter: None,
             directory_scope: DirectoryScope::Global,
             search_engine: SessionSearch::new(),
@@ -136,6 +155,7 @@ impl App {
             loading: false,
             loading_rx: None,
             keybindings,
+            theme,
         }
     }
 
@@ -192,7 +212,7 @@ impl App {
         got_update
     }
 
-    fn update_agent_counts(&mut self) {
+    pub fn update_agent_counts(&mut self) {
         self.agent_counts.clear();
         let scope = self.directory_scope;
         let dir = self.directory_filter.as_deref();
@@ -235,6 +255,9 @@ impl App {
         let scope = self.directory_scope;
         let dir_filter = self.directory_filter.clone();
 
+        // Use Tantivy time sort only when sorting by Date with a query
+        let use_tantivy_time_sort = self.sort_column == SortColumn::Date && !self.query.is_empty();
+
         if self.query.is_empty() {
             self.filtered = self.sessions.clone();
             if let Some(ref agent) = self.agent_filter {
@@ -248,7 +271,7 @@ impl App {
                 self.agent_filter.as_deref(),
                 effective_dir,
                 200,
-                self.sort_by_time,
+                use_tantivy_time_sort,
             );
             // search engine uses "contains" — for Local mode, further filter to exact
             if scope == DirectoryScope::Local {
@@ -257,11 +280,92 @@ impl App {
             }
         }
 
+        // Apply in-memory sort (Date with query uses Tantivy's fast field)
+        let dir = self.sort_direction;
+        match self.sort_column {
+            SortColumn::Date if use_tantivy_time_sort && dir == SortDirection::Desc => {
+                // Tantivy already sorted desc
+            }
+            SortColumn::Date if use_tantivy_time_sort && dir == SortDirection::Asc => {
+                self.filtered.reverse();
+            }
+            SortColumn::Date => {
+                self.filtered.sort_by(|a, b| {
+                    let cmp = a.mtime.total_cmp(&b.mtime);
+                    if dir == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+            SortColumn::Agent => {
+                self.filtered.sort_by(|a, b| {
+                    let cmp = a.agent.cmp(&b.agent);
+                    if dir == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+            SortColumn::Title => {
+                self.filtered.sort_by(|a, b| {
+                    let cmp = a.title.cmp(&b.title);
+                    if dir == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+            SortColumn::Directory => {
+                self.filtered.sort_by(|a, b| {
+                    let cmp = a.directory.cmp(&b.directory);
+                    if dir == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+            SortColumn::Turns => {
+                self.filtered.sort_by(|a, b| {
+                    let cmp = a.message_count.cmp(&b.message_count);
+                    if dir == SortDirection::Desc {
+                        cmp.reverse()
+                    } else {
+                        cmp
+                    }
+                });
+            }
+        }
+
         self.last_search_time = Some(start.elapsed());
         self.results_state.select_first();
         self.preview_scroll = 0;
         self.preview_auto_scroll = true;
         self.search_dirty = false;
+    }
+
+    /// Toggle sorting by the given column. If already active, flip direction;
+    /// if different column, switch to it with a sensible default direction.
+    pub fn toggle_sort_column(&mut self, column: SortColumn) {
+        if self.sort_column == column {
+            // Flip direction
+            self.sort_direction = match self.sort_direction {
+                SortDirection::Asc => SortDirection::Desc,
+                SortDirection::Desc => SortDirection::Asc,
+            };
+        } else {
+            self.sort_column = column;
+            // Default direction: Date/Turns desc (newest/most first), others asc (A-Z)
+            self.sort_direction = match column {
+                SortColumn::Date | SortColumn::Turns => SortDirection::Desc,
+                _ => SortDirection::Asc,
+            };
+        }
+        self.search_dirty = true;
     }
 
     pub fn selected_session(&self) -> Option<&Session> {
@@ -331,8 +435,7 @@ impl App {
                     handled = true;
                 }
                 Action::ToggleSort => {
-                    self.sort_by_time = !self.sort_by_time;
-                    self.search_dirty = true;
+                    self.toggle_sort_column(SortColumn::Date);
                     handled = true;
                 }
                 Action::DeleteWordBackward => {
@@ -380,6 +483,10 @@ impl App {
                 Action::CycleAgentFilterBackward => {
                     self.cycle_agent_filter_back();
                     self.search_dirty = true;
+                    handled = true;
+                }
+                Action::RefreshSessions => {
+                    self.start_loading();
                     handled = true;
                 }
 
@@ -618,8 +725,21 @@ impl App {
                     self.focused_pane = FocusedPane::Preview;
                 } else if self.is_in_area(mouse.column, mouse.row, self.results_area) {
                     self.focused_pane = FocusedPane::Results;
-                    // Select row on click
                     let area = self.results_area;
+
+                    // Header click: toggle sort column
+                    let header_y = area.y + 1; // border + header row
+                    if mouse.row == header_y && mouse.column > area.x {
+                        let inner_width = (area.width.saturating_sub(2)) as usize; // subtract borders
+                        let col = (mouse.column - area.x - 1) as usize;
+                        let widths = super::results_list::compute_column_widths(inner_width);
+                        if let Some(sort_col) = super::results_list::hit_test_header(col, &widths) {
+                            self.toggle_sort_column(sort_col);
+                        }
+                        return;
+                    }
+
+                    // Select row on click
                     let content_y = area.y + 2;
                     let content_bottom = area.y + area.height.saturating_sub(1);
                     if mouse.row >= content_y && mouse.row < content_bottom {
