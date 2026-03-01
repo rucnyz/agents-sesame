@@ -420,15 +420,15 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
         engine.stream_sessions(cli.rebuild, cli.agent.as_deref(), |sessions| {
             let now = chrono::Local::now().naive_local();
             for s in sessions {
-                if let Some(ref agent) = agent_filter {
-                    if s.agent != *agent {
-                        continue;
-                    }
+                if let Some(ref agent) = agent_filter
+                    && s.agent != *agent
+                {
+                    continue;
                 }
-                if let Some(ref df) = dir_filter {
-                    if !s.directory.to_lowercase().contains(df.as_str()) {
-                        continue;
-                    }
+                if let Some(ref df) = dir_filter
+                    && !s.directory.to_lowercase().contains(df.as_str())
+                {
+                    continue;
                 }
                 let dir = s.directory.replace(&home_str, "~");
                 let date = format_time_ago(s.timestamp, now);
