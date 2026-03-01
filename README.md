@@ -71,10 +71,11 @@ ase uninstall                # Remove binary, config, cache, and shell integrati
 | `Enter` | Resume selected session |
 | `Tab` / `Shift+Tab` | Cycle agent filter |
 | `Ctrl+S` | Toggle sort (relevance / time) |
-| `Ctrl+U/D` | Scroll preview |
+| `Ctrl+D` | Cycle directory scope |
+| `Ctrl+U` | Clear search |
 | `` Ctrl+` `` | Toggle preview |
 | `Ctrl+P` | Toggle preview layout |
-| `c` | Copy resume command |
+| `c` | Copy session content |
 | `Ctrl+E` | Toggle mouse capture |
 | `Esc` | Quit |
 
@@ -137,41 +138,9 @@ ase --list --format=tsv | fzf --delimiter='\t' --with-nth=2,3,4,5,6 \
   --bind='enter:become(ase --resume {1})'
 ```
 
-### television
+### television / matugen
 
-Copy the cable channel config to your television config:
-
-```sh
-cp docs/television-channel.toml ~/.config/television/cable/ase.toml
-```
-
-Then run:
-
-```sh
-tv ase
-```
-
-### matugen (auto-theme from wallpaper)
-
-1. Copy the template:
-
-```sh
-cp docs/matugen-template.toml ~/.config/matugen/templates/ase.toml
-```
-
-2. Add to your matugen config (`~/.config/matugen/config.toml`):
-
-```toml
-[templates.ase]
-input_path = "~/.config/matugen/templates/ase.toml"
-output_path = "~/.config/agents-sesame/config.toml"
-```
-
-3. Run matugen — ase will pick up the generated theme on next launch:
-
-```sh
-matugen image /path/to/wallpaper.jpg
-```
+See the [Integrations](https://rucnyz.github.io/agents-sesame/integrations.html) page for television cable channel and matugen auto-theme setup.
 
 ## Roadmap
 
