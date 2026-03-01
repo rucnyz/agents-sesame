@@ -34,12 +34,12 @@
   th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
   th { background: var(--th-bg); }
   a { color: var(--link); }
-  nav { margin-bottom: 2rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
-  nav a { margin-right: 1.5rem; text-decoration: none; }
-  nav a:hover { text-decoration: underline; }
-  nav a.active { border-bottom: 2px solid var(--link); padding-bottom: 2px; }
-  nav .brand { color: var(--accent); font-weight: bold; }
-  nav .brand.active { border-bottom: 2px solid var(--accent); }
+  nav { margin-bottom: 2rem; }
+  nav .brand { display: block; color: var(--accent); font-weight: bold; font-size: 1.4em; text-decoration: none; margin-bottom: 0.4rem; }
+  nav .links { padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  nav .links a { margin-right: 1.5rem; text-decoration: none; }
+  nav .links a:hover { text-decoration: underline; }
+  nav .links a.active { border-bottom: 2px solid var(--link); padding-bottom: 2px; }
   .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 4px; border: 1px solid var(--border); }
   pre { position: relative; }
   .copy-btn { position: absolute; top: 6px; right: 6px; background: var(--kbd-bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.8em; color: var(--fg); opacity: 0.6; transition: opacity 0.2s; }
@@ -57,10 +57,12 @@
 </button>
 
 <nav>
-  <a href="index.html" class="brand">ase</a>
-  <a href="index.html">Overview</a>
-  <a href="integrations.html">Integrations</a>
-  <a href="theme.html" class="active">Theme</a>
+  <a href="index.html" class="brand">agents-sesame (ase)</a>
+  <div class="links">
+    <a href="index.html">Overview</a>
+    <a href="integrations.html">Integrations</a>
+    <a href="theme.html" class="active">Theme</a>
+  </div>
 </nav>
 
 <h1>Material You Theme</h1>
