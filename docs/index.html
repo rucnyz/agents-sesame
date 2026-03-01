@@ -41,9 +41,8 @@
   nav .brand { color: var(--accent); font-weight: bold; }
   nav .brand.active { border-bottom: 2px solid var(--accent); }
   pre { position: relative; }
-  .copy-btn { position: absolute; top: 6px; right: 6px; background: var(--kbd-bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.8em; color: var(--fg); opacity: 0; transition: opacity 0.2s; }
-  pre:hover .copy-btn { opacity: 0.7; }
-  .copy-btn:hover { opacity: 1 !important; }
+  .copy-btn { position: absolute; top: 6px; right: 6px; background: var(--kbd-bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.8em; color: var(--fg); opacity: 0.6; transition: opacity 0.2s; }
+  .copy-btn:hover { opacity: 1; }
   .theme-toggle { position: fixed; top: 1rem; right: 1rem; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 1.2em; color: var(--fg); transition: background 0.2s; }
   .theme-toggle:hover { opacity: 0.8; }
 </style>
@@ -57,7 +56,8 @@
 </button>
 
 <nav>
-  <a href="index.html" class="brand active">ase</a>
+  <a href="index.html" class="brand">ase</a>
+  <a href="index.html" class="active">Overview</a>
   <a href="integrations.html">Integrations</a>
   <a href="theme.html">Theme</a>
 </nav>
