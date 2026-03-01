@@ -233,11 +233,11 @@ complete -c ase -l preview -f -a '(ase --list --format=tsv 2>/dev/null | while r
 complete -c ase -l resume -f -a '(ase --list --format=tsv 2>/dev/null | while read -d\t id agent title rest; printf "%s\t%s: %s\n" $id $agent $title; end)'
 
 # ase keybinding (Alt+G)
-function __fr_rs_widget
+function __ase_widget
     ase -d (pwd)
     commandline -f repaint
 end
-bind \eg __fr_rs_widget
+bind \eg __ase_widget
 "#,
         ),
         "bash" => code.push_str(
@@ -257,10 +257,10 @@ _fr_rs_complete() {
 complete -F _fr_rs_complete ase
 
 # ase keybinding (Alt+G)
-__fr_rs_widget() {
+__ase_widget() {
     ase -d "$PWD"
 }
-bind -x '"\eg":"__fr_rs_widget"'
+bind -x '"\eg":"__ase_widget"'
 "#,
         ),
         "zsh" => code.push_str(
@@ -281,12 +281,12 @@ _fr_rs() {
 compdef _fr_rs ase
 
 # ase keybinding (Alt+G)
-__fr_rs_widget() {
+__ase_widget() {
     ase -d "$PWD"
     zle reset-prompt
 }
-zle -N __fr_rs_widget
-bindkey '\eg' __fr_rs_widget
+zle -N __ase_widget
+bindkey '\eg' __ase_widget
 "#,
         ),
         // elvish / powershell: completions only (from clap_complete above)
