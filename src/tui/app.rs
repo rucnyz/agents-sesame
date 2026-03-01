@@ -329,7 +329,7 @@ impl App {
                 &self.query,
                 self.agent_filter.as_deref(),
                 effective_dir,
-                200,
+                self.sessions.len().max(1),
             );
             self.search_scores.clear();
             self.filtered = scored_results

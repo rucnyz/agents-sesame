@@ -414,7 +414,12 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
     let results = if let Some(ref query) = cli.query {
         if !query.is_empty() {
             engine
-                .search(query, cli.agent.as_deref(), cli.directory.as_deref(), 100)
+                .search(
+                    query,
+                    cli.agent.as_deref(),
+                    cli.directory.as_deref(),
+                    sessions.len().max(1),
+                )
                 .into_iter()
                 .map(|(s, _)| s)
                 .collect()
