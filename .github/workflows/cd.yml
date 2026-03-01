@@ -95,10 +95,11 @@ jobs:
           shasum -a 256 "$RELEASE_NAME.tar.gz" > "$RELEASE_NAME.tar.gz.sha256"
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          files: |
+          allowUpdates: true
+          omitBody: true
+          omitName: true
+          artifacts: |
             fr-rs-*.tar.gz
             fr-rs-*.tar.gz.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
