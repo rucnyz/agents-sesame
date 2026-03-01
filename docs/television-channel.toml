@@ -9,6 +9,7 @@ requirements = ["ase"]
 
 [source]
 command = "ase --list --format=tsv"
+display = "{split:\t:1}  {split:\t:2}  {split:\t:3}  {split:\t:5}"
 output = "{split:\t:0}"
 
 [preview]

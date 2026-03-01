@@ -368,6 +368,50 @@ fn print_init(shell_arg: &str) -> anyhow::Result<()> {
             shell
         );
     }
+
+    // Offer to install television cable channel
+    install_tv_channel()?;
+
+    Ok(())
+}
+
+/// Detect television and offer to install the ase cable channel.
+fn install_tv_channel() -> anyhow::Result<()> {
+    // Check if television is installed
+    if which::which("tv").is_err() {
+        return Ok(());
+    }
+
+    let cable_dir = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("television/cable");
+    let channel_file = cable_dir.join("ase.toml");
+
+    if channel_file.exists() {
+        println!(
+            "Television channel already installed at {}",
+            channel_file.display()
+        );
+        return Ok(());
+    }
+
+    // Ask user
+    eprint!("Television detected. Install ase channel for `tv ase`? [Y/n] ");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let answer = input.trim().to_lowercase();
+    if !answer.is_empty() && answer != "y" && answer != "yes" {
+        println!("Skipped television channel installation.");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&cable_dir)?;
+    std::fs::write(
+        &channel_file,
+        include_str!("../docs/television-channel.toml"),
+    )?;
+    println!("Installed television channel at {}", channel_file.display());
+    println!("Try: tv ase");
     Ok(())
 }
 
