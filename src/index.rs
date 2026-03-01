@@ -459,10 +459,15 @@ impl TantivyIndex {
 
         if clauses.is_empty() {
             None
-        } else if clauses.len() == 1 && clauses[0].0 == Occur::Must {
-            Some(clauses.pop().unwrap().1)
         } else {
-            Some(Box::new(BooleanQuery::new(clauses)))
+            let q: Box<dyn tantivy::query::Query> =
+                if clauses.len() == 1 && clauses[0].0 == Occur::Must {
+                    clauses.pop().unwrap().1
+                } else {
+                    Box::new(BooleanQuery::new(clauses))
+                };
+            // Zero-boost: filter only, no score contribution
+            Some(Box::new(BoostQuery::new(q, 0.0)))
         }
     }
 
@@ -494,7 +499,11 @@ impl TantivyIndex {
         if clauses.is_empty() {
             None
         } else {
-            Some(Box::new(BooleanQuery::new(clauses)))
+            // Zero-boost: filter only, no score contribution
+            Some(Box::new(BoostQuery::new(
+                Box::new(BooleanQuery::new(clauses)),
+                0.0,
+            )))
         }
     }
 
