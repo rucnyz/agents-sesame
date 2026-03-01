@@ -330,8 +330,7 @@ impl App {
                     });
                 } else {
                     // No query — fall back to Date desc
-                    self.filtered
-                        .sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
+                    self.filtered.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
                 }
             }
             _ => {

@@ -43,7 +43,10 @@ impl Theme {
     pub fn from_config(config: &Option<ThemeConfig>) -> Self {
         let c = config.as_ref();
         Self {
-            primary: parse_or(c.and_then(|c| c.primary.as_deref()), Color::Rgb(232, 123, 53)),
+            primary: parse_or(
+                c.and_then(|c| c.primary.as_deref()),
+                Color::Rgb(232, 123, 53),
+            ),
             on_surface: parse_or(c.and_then(|c| c.on_surface.as_deref()), Color::White),
             on_surface_variant: parse_or(
                 c.and_then(|c| c.on_surface_variant.as_deref()),
@@ -57,10 +60,7 @@ impl Theme {
                 c.and_then(|c| c.surface_container.as_deref()),
                 Color::Rgb(60, 60, 60),
             ),
-            secondary: parse_or(
-                c.and_then(|c| c.secondary.as_deref()),
-                Color::Cyan,
-            ),
+            secondary: parse_or(c.and_then(|c| c.secondary.as_deref()), Color::Cyan),
             tertiary: parse_or(
                 c.and_then(|c| c.tertiary.as_deref()),
                 Color::Rgb(100, 255, 100),

@@ -196,9 +196,7 @@ impl SessionSearch {
 
         results
             .into_iter()
-            .filter_map(|(id, score)| {
-                self.sessions_by_id.get(&id).map(|s| (s.clone(), score))
-            })
+            .filter_map(|(id, score)| self.sessions_by_id.get(&id).map(|s| (s.clone(), score)))
             .collect()
     }
 

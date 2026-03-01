@@ -1,10 +1,10 @@
+use crate::config;
+use crate::session::Session;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
-use crate::config;
-use crate::session::Session;
 
 use super::theme::Theme;
 use super::utils::highlight_spans;

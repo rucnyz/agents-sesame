@@ -195,12 +195,7 @@ fn generate_completions(shell: &str) -> String {
     let mut buf = Vec::new();
     match shell {
         "nushell" | "nu" => {
-            clap_complete::generate(
-                clap_complete_nushell::Nushell,
-                &mut cmd,
-                "fr-rs",
-                &mut buf,
-            );
+            clap_complete::generate(clap_complete_nushell::Nushell, &mut cmd, "fr-rs", &mut buf);
         }
         _ => {
             let clap_shell = match shell {
@@ -319,10 +314,7 @@ fn print_init(shell_arg: &str) -> anyhow::Result<()> {
     }
 
     // Write init file to ~/.config/rust-resume/init.{shell}
-    let init_dir = crate::config::config_file()
-        .parent()
-        .unwrap()
-        .to_path_buf();
+    let init_dir = crate::config::config_file().parent().unwrap().to_path_buf();
     std::fs::create_dir_all(&init_dir)?;
     let init_file = init_dir.join(format!("init.{shell}"));
     std::fs::write(&init_file, shell_init_code(&shell))?;
