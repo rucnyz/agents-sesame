@@ -58,33 +58,43 @@
 
 <h3>Navigation</h3>
 <table>
+<tr><th>Key</th><th>Results Focused</th><th>Preview Focused</th></tr>
+<tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navigate results</td><td>Scroll preview</td></tr>
+<tr><td><kbd>Shift+↑</kbd> / <kbd>Shift+↓</kbd></td><td>Scroll preview</td><td>Navigate results</td></tr>
+<tr><td><kbd>PgUp</kbd> / <kbd>PgDn</kbd></td><td>Page results</td><td>Page preview</td></tr>
+<tr><td><kbd>Shift+PgUp</kbd> / <kbd>Shift+PgDn</kbd></td><td>Page preview</td><td>Page results</td></tr>
+<tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Search cursor start/end</td><td>Preview top/bottom</td></tr>
+</table>
+
+<h3>Pane Focus</h3>
+<table>
 <tr><th>Key</th><th>Action</th></tr>
-<tr><td><kbd>↑</kbd> / <kbd>k</kbd></td><td>Move up</td></tr>
-<tr><td><kbd>↓</kbd> / <kbd>j</kbd></td><td>Move down</td></tr>
-<tr><td><kbd>PgUp</kbd> / <kbd>PgDn</kbd></td><td>Page up / down in results</td></tr>
-<tr><td><kbd>Ctrl+U</kbd> / <kbd>Ctrl+D</kbd></td><td>Scroll preview up / down</td></tr>
-<tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to first / last result</td></tr>
+<tr><td><kbd>Ctrl+T</kbd> / <kbd>`</kbd></td><td>Toggle focus between Results and Preview</td></tr>
+<tr><td>Click on pane</td><td>Switch focus to clicked pane</td></tr>
 </table>
 
 <h3>Actions</h3>
 <table>
 <tr><th>Key</th><th>Action</th></tr>
-<tr><td><kbd>Enter</kbd></td><td>Resume selected session</td></tr>
-<tr><td><kbd>c</kbd></td><td>Copy resume command to clipboard</td></tr>
-<tr><td><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd></td><td>Cycle agent filter</td></tr>
+<tr><td><kbd>Enter</kbd> / Double-click</td><td>Resume selected session</td></tr>
+<tr><td><kbd>c</kbd> (preview focused)</td><td>Copy session content to clipboard</td></tr>
+<tr><td><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd></td><td>Cycle agent filter forward / backward</td></tr>
+<tr><td>Click filter chip</td><td>Switch to clicked agent filter</td></tr>
 <tr><td><kbd>Ctrl+S</kbd></td><td>Toggle sort (relevance / time)</td></tr>
+<tr><td><kbd>Ctrl+D</kbd></td><td>Cycle directory scope (Local → Project → Global)</td></tr>
 <tr><td><kbd>Ctrl+`</kbd></td><td>Toggle preview panel</td></tr>
 <tr><td><kbd>Ctrl+P</kbd></td><td>Toggle preview layout (bottom / right)</td></tr>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Toggle mouse capture (on = scroll/click, off = select text)</td></tr>
-<tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd></td><td>Quit</td></tr>
+<tr><td><kbd>Shift+mouse drag</kbd></td><td>Native text selection (even with mouse capture on)</td></tr>
+<tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd> / <kbd>Ctrl+Q</kbd></td><td>Quit</td></tr>
 </table>
 
 <h3>Search Input</h3>
 <table>
 <tr><th>Key</th><th>Action</th></tr>
-<tr><td><kbd>Ctrl+A</kbd></td><td>Move cursor to start</td></tr>
-<tr><td><kbd>Ctrl+K</kbd></td><td>Delete to end of line</td></tr>
 <tr><td><kbd>Ctrl+W</kbd></td><td>Delete word backward</td></tr>
+<tr><td><kbd>Ctrl+U</kbd></td><td>Clear search</td></tr>
+<tr><td><kbd>Ctrl+←</kbd> / <kbd>Ctrl+→</kbd></td><td>Jump word left / right</td></tr>
 <tr><td><kbd>Backspace</kbd></td><td>Delete character</td></tr>
 </table>
 
@@ -104,6 +114,14 @@ fr-rs --list 'niri'            # Search and list
 fr-rs --agent claude --list    # Filter by agent
 fr-rs --rebuild --list         # Force rebuild index
 fr-rs --stats                  # Show index stats</code></pre>
+
+<h2>Configuration</h2>
+<p>Optional config at <code>~/.config/rust-resume/config.toml</code>. All keybindings are configurable:</p>
+<pre><code>[keybindings]
+quit = ["esc", "ctrl+c", "ctrl+q"]
+toggle_sort = "ctrl+s"
+copy_session_content = "y"</code></pre>
+<p>Key format: <code>modifier+key</code> (e.g. <code>ctrl+s</code>, <code>shift+up</code>, <code>backtick</code>). Unmentioned actions keep defaults.</p>
 
 <p><a href="https://github.com/rucnyz/rust-resume">GitHub</a></p>
 

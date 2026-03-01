@@ -1,6 +1,7 @@
 pub mod app;
 pub mod filter_bar;
 pub mod icons;
+pub mod keybindings;
 pub mod preview;
 pub mod results_list;
 pub mod utils;
@@ -18,9 +19,9 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use tui_scrollbar::{ScrollBar, ScrollLengths};
+use tui_scrollbar::{GlyphSet, ScrollBar, ScrollLengths};
 
-use app::App;
+use app::{App, FocusedPane};
 use filter_bar::FilterBar;
 use preview::Preview;
 use results_list::ResultsList;
@@ -36,10 +37,14 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(yolo);
+    let cfg = crate::config::AppConfig::load();
+    let kb = keybindings::KeyBindings::load(&cfg.keybindings);
+
+    let mut app = App::new(yolo, kb);
     app.icons = icon_manager;
     if let Some(dir) = directory {
         app.directory_filter = Some(dir.to_string());
+        app.directory_scope = app::DirectoryScope::Local;
     }
     app.start_loading();
 
@@ -81,11 +86,29 @@ fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> io::Result<()> {
-    loop {
-        app.check_loading();
-        terminal.draw(|f| draw(f, app))?;
+    let mut needs_redraw = true; // always draw the first frame
+    let mut last_size = terminal.size()?;
 
-        app.handle_events()?;
+    loop {
+        if app.check_loading() {
+            needs_redraw = true;
+        }
+
+        // Detect terminal resize even if Event::Resize wasn't fired (Wayland)
+        let current_size = terminal.size()?;
+        if current_size != last_size {
+            last_size = current_size;
+            needs_redraw = true;
+        }
+
+        if needs_redraw {
+            terminal.draw(|f| draw(f, app))?;
+            needs_redraw = false;
+        }
+
+        if app.handle_events()? {
+            needs_redraw = true;
+        }
 
         if app.mouse_toggle_pending {
             app.mouse_toggle_pending = false;
@@ -96,6 +119,7 @@ fn run_loop(
                 execute!(terminal.backend_mut(), DisableMouseCapture)?;
                 app.status_msg = Some("Mouse: OFF (select text)".to_string());
             }
+            needs_redraw = true;
         }
 
         if app.should_quit {
@@ -121,6 +145,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 
     draw_title_bar(f, chunks[0], app);
     draw_search_box(f, chunks[1], app);
+    app.filter_bar_area = chunks[2];
     draw_filter_bar(f, chunks[2], app);
     draw_content(f, chunks[3], app);
     draw_footer(f, chunks[4], app);
@@ -156,6 +181,17 @@ fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
             format!("  sort: {sort_label}"),
             Style::default().fg(Color::DarkGray),
         ));
+        if app.directory_filter.is_some() {
+            let (label, color) = match app.directory_scope {
+                app::DirectoryScope::Local => ("local", Color::Rgb(100, 255, 100)),
+                app::DirectoryScope::Project => ("project", Color::Rgb(100, 200, 255)),
+                app::DirectoryScope::Global => ("global", Color::DarkGray),
+            };
+            spans.push(Span::styled(
+                format!("  scope: {label}"),
+                Style::default().fg(color),
+            ));
+        }
     }
 
     if let Some(ref msg) = app.status_msg {
@@ -201,12 +237,15 @@ fn draw_search_box(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let line = Paragraph::new(Line::from(spans));
     f.render_widget(line, inner);
 
-    // Show cursor — use display width for CJK support
-    let cursor_x =
-        inner.x + 2 + unicode_width::UnicodeWidthStr::width(&app.query[..app.cursor_pos]) as u16;
-    let cursor_y = inner.y;
-    if cursor_x < inner.x + inner.width {
-        f.set_cursor_position((cursor_x, cursor_y));
+    // Show cursor only when results focused (typing active)
+    if app.focused_pane == FocusedPane::Results {
+        let cursor_x = inner.x
+            + 2
+            + unicode_width::UnicodeWidthStr::width(&app.query[..app.cursor_pos]) as u16;
+        let cursor_y = inner.y;
+        if cursor_x < inner.x + inner.width {
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
     }
 }
 
@@ -247,6 +286,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         let results = ResultsList {
             sessions: &app.filtered,
             query: &app.query,
+            focused: app.focused_pane == FocusedPane::Results,
         };
         f.render_stateful_widget(results, chunks[0], &mut app.results_state);
 
@@ -262,6 +302,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             badge_lines: &mut badge_lines,
             total_lines: &mut total_lines,
             first_match_row: &mut first_match_row,
+            focused: app.focused_pane == FocusedPane::Preview,
         };
         f.render_widget(preview, chunks[1]);
 
@@ -291,6 +332,8 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
                 viewport_len: preview_visible,
             })
             .offset(app.preview_scroll as usize)
+            .glyph_set(GlyphSet::unicode())
+            .track_style(Style::default().fg(Color::Rgb(60, 60, 60)))
             .thumb_style(Style::default().fg(Color::DarkGray));
             f.render_widget(&scrollbar, sb_area);
             app.preview_scrollbar = Some(scrollbar);
@@ -312,6 +355,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         let results = ResultsList {
             sessions: &app.filtered,
             query: &app.query,
+            focused: true, // always focused when preview hidden
         };
         f.render_stateful_widget(results, area, &mut app.results_state);
     }
@@ -330,6 +374,8 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
             viewport_len: results_visible,
         })
         .offset(app.results_state.offset)
+        .glyph_set(GlyphSet::unicode())
+        .track_style(Style::default().fg(Color::Rgb(60, 60, 60)))
         .thumb_style(Style::default().fg(Color::DarkGray));
         f.render_widget(&scrollbar, sb_area);
         app.results_scrollbar = Some(scrollbar);
@@ -429,26 +475,48 @@ fn draw_preview_icons(
     }
 }
 
-fn draw_footer(f: &mut ratatui::Frame, area: Rect, _app: &App) {
-    let spans = vec![
-        Span::styled(" ↑↓/jk", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" nav ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Enter", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" resume ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Tab", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" filter ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ^S", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" sort ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ^`", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" preview ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ^P", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" layout ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" c", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" copy ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" ^E", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" mouse ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Esc", Style::default().fg(Color::Rgb(232, 123, 53))),
-        Span::styled(" quit", Style::default().fg(Color::DarkGray)),
-    ];
+fn draw_footer(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let key = Style::default().fg(Color::Rgb(232, 123, 53));
+    let dim = Style::default().fg(Color::DarkGray);
+
+    let spans = if app.focused_pane == FocusedPane::Preview {
+        vec![
+            Span::styled(" ↑↓", key),
+            Span::styled(" scroll ", dim),
+            Span::styled(" Home/End", key),
+            Span::styled(" top/btm ", dim),
+            Span::styled(" c", key),
+            Span::styled(" copy ", dim),
+            Span::styled(" ^T", key),
+            Span::styled(" results ", dim),
+            Span::styled(" Enter", key),
+            Span::styled(" resume ", dim),
+            Span::styled(" Tab", key),
+            Span::styled(" filter ", dim),
+            Span::styled(" Esc/^Q", key),
+            Span::styled(" quit", dim),
+        ]
+    } else {
+        vec![
+            Span::styled(" ↑↓", key),
+            Span::styled(" nav ", dim),
+            Span::styled(" ^T", key),
+            Span::styled(" preview ", dim),
+            Span::styled(" Enter/2×click", key),
+            Span::styled(" resume ", dim),
+            Span::styled(" Tab", key),
+            Span::styled(" filter ", dim),
+            Span::styled(" ^S", key),
+            Span::styled(" sort ", dim),
+            Span::styled(" ^`", key),
+            Span::styled(" toggle ", dim),
+            Span::styled(" ^P", key),
+            Span::styled(" layout ", dim),
+            Span::styled(" ^D", key),
+            Span::styled(" scope ", dim),
+            Span::styled(" Esc/^Q", key),
+            Span::styled(" quit", dim),
+        ]
+    };
     f.render_widget(Line::from(spans), area);
 }

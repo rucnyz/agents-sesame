@@ -16,6 +16,7 @@ use super::utils::{
 pub struct ResultsList<'a> {
     pub sessions: &'a [Session],
     pub query: &'a str,
+    pub focused: bool,
 }
 
 #[derive(Default)]
@@ -64,9 +65,14 @@ impl StatefulWidget for ResultsList<'_> {
     type State = ResultsState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let border_color = if self.focused {
+            Color::Rgb(232, 123, 53)
+        } else {
+            Color::DarkGray
+        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(Style::default().fg(border_color));
 
         let inner = block.inner(area);
         block.render(area, buf);

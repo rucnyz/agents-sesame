@@ -152,6 +152,11 @@ impl OpenCodeAdapter {
                 title
             };
 
+            // Skip empty ACP sessions (auto-created with no content)
+            if title.starts_with("ACP Session") {
+                continue;
+            }
+
             let mut messages: Vec<String> = Vec::new();
             let session_msgs = messages_by_session.get(&id).cloned().unwrap_or_default();
             for (msg_id, role) in &session_msgs {
@@ -347,6 +352,11 @@ impl OpenCodeAdapter {
                 title
             };
 
+            // Skip empty ACP sessions (auto-created with no content)
+            if title.starts_with("ACP Session") {
+                continue;
+            }
+
             let mut messages: Vec<String> = Vec::new();
             let session_msgs = messages_by_session.get(&id).cloned().unwrap_or_default();
             for (msg_id, role) in &session_msgs {
@@ -506,6 +516,12 @@ impl OpenCodeAdapter {
             .and_then(Value::as_str)
             .unwrap_or("Untitled session")
             .to_string();
+
+        // Skip empty ACP sessions (auto-created with no content)
+        if title.starts_with("ACP Session") {
+            return None;
+        }
+
         let directory = val
             .get("directory")
             .and_then(Value::as_str)

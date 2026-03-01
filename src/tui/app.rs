@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+
+use super::keybindings::{Action, KeyBindings};
 use ratatui::layout::Rect;
 use tui_scrollbar::{ScrollBar, ScrollBarInteraction, ScrollCommand};
 
@@ -11,6 +13,22 @@ use crate::session::Session;
 use super::icons::IconManager;
 
 use super::results_list::ResultsState;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FocusedPane {
+    Results,
+    Preview,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryScope {
+    /// Exact match: only sessions from this exact directory.
+    Local,
+    /// Contains match: sessions whose directory contains the filter string.
+    Project,
+    /// No directory filter.
+    Global,
+}
 
 pub struct App {
     pub query: String,
@@ -26,6 +44,8 @@ pub struct App {
     pub total_count: usize,
     pub sort_by_time: bool,
     pub directory_filter: Option<String>,
+    /// Directory scope mode (Local/Project/Global).
+    pub directory_scope: DirectoryScope,
     pub search_engine: SessionSearch,
     pub should_quit: bool,
     pub resume_session: Option<Session>,
@@ -59,14 +79,22 @@ pub struct App {
     pub preview_sb_area: Rect,
     /// Whether preview should auto-scroll to first match on next render.
     pub preview_auto_scroll: bool,
+    /// Which pane is focused for navigation keys.
+    pub focused_pane: FocusedPane,
+    /// Area where filter bar is rendered (for mouse click).
+    pub filter_bar_area: Rect,
+    /// Last click info for double-click detection: (time, selected_index).
+    last_click: Option<(Instant, usize)>,
     /// Whether sessions are still loading in background.
     pub loading: bool,
     /// Receiver for progressive background session loading.
     pub loading_rx: Option<std::sync::mpsc::Receiver<LoadingMsg>>,
+    /// Configurable keybindings.
+    pub keybindings: KeyBindings,
 }
 
 impl App {
-    pub fn new(yolo: bool) -> Self {
+    pub fn new(yolo: bool, keybindings: KeyBindings) -> Self {
         Self {
             query: String::new(),
             cursor_pos: 0,
@@ -81,6 +109,7 @@ impl App {
             total_count: 0,
             sort_by_time: false,
             directory_filter: None,
+            directory_scope: DirectoryScope::Global,
             search_engine: SessionSearch::new(),
             should_quit: false,
             resume_session: None,
@@ -101,8 +130,12 @@ impl App {
             results_sb_area: Rect::default(),
             preview_sb_area: Rect::default(),
             preview_auto_scroll: false,
+            focused_pane: FocusedPane::Results,
+            filter_bar_area: Rect::default(),
+            last_click: None,
             loading: false,
             loading_rx: None,
+            keybindings,
         }
     }
 
@@ -119,9 +152,10 @@ impl App {
     }
 
     /// Check for progressive loading updates (non-blocking, drains all available).
-    pub fn check_loading(&mut self) {
+    /// Returns true if any updates were received (i.e. a redraw is needed).
+    pub fn check_loading(&mut self) -> bool {
         if self.loading_rx.is_none() {
-            return;
+            return false;
         }
 
         let mut got_update = false;
@@ -133,7 +167,6 @@ impl App {
             match msg {
                 Ok(LoadingMsg::Sessions(sessions)) => {
                     self.sessions = sessions;
-                    self.total_count = self.sessions.len();
                     self.update_agent_counts();
                     got_update = true;
                 }
@@ -155,36 +188,73 @@ impl App {
         if got_update {
             self.apply_filter();
         }
+
+        got_update
     }
 
     fn update_agent_counts(&mut self) {
         self.agent_counts.clear();
+        let scope = self.directory_scope;
+        let dir = self.directory_filter.as_deref();
+        let mut total = 0;
         for s in &self.sessions {
+            if !Self::session_matches_scope(s, scope, dir) {
+                continue;
+            }
             *self.agent_counts.entry(s.agent.clone()).or_insert(0) += 1;
+            total += 1;
+        }
+        self.total_count = total;
+    }
+
+    /// Check if a session matches a directory scope.
+    fn session_matches_scope(session: &Session, scope: DirectoryScope, dir: Option<&str>) -> bool {
+        let Some(dir) = dir else {
+            return true;
+        };
+        match scope {
+            DirectoryScope::Global => true,
+            DirectoryScope::Local => session.directory == dir,
+            DirectoryScope::Project => session
+                .directory
+                .to_lowercase()
+                .contains(&dir.to_lowercase()),
         }
     }
 
     pub fn apply_filter(&mut self) {
         let start = Instant::now();
 
+        // Compute effective directory filter for search engine
+        let effective_dir = match self.directory_scope {
+            DirectoryScope::Global => None,
+            _ => self.directory_filter.as_deref(),
+        };
+
+        // Capture scope params to avoid borrow issues in closures
+        let scope = self.directory_scope;
+        let dir_filter = self.directory_filter.clone();
+
         if self.query.is_empty() {
             self.filtered = self.sessions.clone();
             if let Some(ref agent) = self.agent_filter {
                 self.filtered.retain(|s| &s.agent == agent);
             }
-            if let Some(ref dir) = self.directory_filter {
-                let lower = dir.to_lowercase();
-                self.filtered
-                    .retain(|s| s.directory.to_lowercase().contains(&lower));
-            }
+            self.filtered
+                .retain(|s| Self::session_matches_scope(s, scope, dir_filter.as_deref()));
         } else {
             self.filtered = self.search_engine.search(
                 &self.query,
                 self.agent_filter.as_deref(),
-                self.directory_filter.as_deref(),
+                effective_dir,
                 200,
                 self.sort_by_time,
             );
+            // search engine uses "contains" — for Local mode, further filter to exact
+            if scope == DirectoryScope::Local {
+                self.filtered
+                    .retain(|s| Self::session_matches_scope(s, scope, dir_filter.as_deref()));
+            }
         }
 
         self.last_search_time = Some(start.elapsed());
@@ -198,186 +268,387 @@ impl App {
         self.filtered.get(self.results_state.selected)
     }
 
-    pub fn handle_events(&mut self) -> std::io::Result<()> {
+    /// Poll for events and handle them. Returns true if a redraw is needed.
+    pub fn handle_events(&mut self) -> std::io::Result<bool> {
+        let mut needs_redraw = false;
+
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
-                Event::Key(key) => self.handle_key(key),
-                Event::Mouse(mouse) => self.handle_mouse(mouse),
+                Event::Key(key) => {
+                    self.handle_key(key);
+                    needs_redraw = true;
+                }
+                Event::Mouse(mouse) => {
+                    // Ignore Shift+mouse: let terminal handle native text selection
+                    if !mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                        self.handle_mouse(mouse);
+                        needs_redraw = true;
+                    }
+                }
+                Event::Resize(..) => {
+                    needs_redraw = true;
+                }
                 _ => {}
             }
         }
 
         if self.search_dirty {
             self.apply_filter();
+            needs_redraw = true;
         }
 
-        Ok(())
+        Ok(needs_redraw)
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let preview_focused = self.focused_pane == FocusedPane::Preview;
+        let actions: Vec<Action> = self.keybindings.lookup(&key).to_vec();
 
-        match key.code {
-            // Quit
-            KeyCode::Esc => {
-                self.should_quit = true;
-            }
-
-            // Ctrl+key combinations
-            KeyCode::Char(c) if ctrl => match c {
-                'c' => self.should_quit = true,
-                '`' => self.show_preview = !self.show_preview,
-                'p' => self.preview_bottom = !self.preview_bottom,
-                's' => {
+        let mut handled = false;
+        for &action in &actions {
+            match action {
+                // Global actions
+                Action::Quit => {
+                    self.should_quit = true;
+                    handled = true;
+                }
+                Action::ResumeSession => {
+                    if let Some(session) = self.selected_session().cloned() {
+                        self.resume_session = Some(session);
+                        self.should_quit = true;
+                    }
+                    handled = true;
+                }
+                Action::TogglePreview => {
+                    self.show_preview = !self.show_preview;
+                    if !self.show_preview {
+                        self.focused_pane = FocusedPane::Results;
+                    }
+                    handled = true;
+                }
+                Action::TogglePreviewLayout => {
+                    self.preview_bottom = !self.preview_bottom;
+                    handled = true;
+                }
+                Action::ToggleSort => {
                     self.sort_by_time = !self.sort_by_time;
                     self.search_dirty = true;
+                    handled = true;
                 }
-                'w' => {
+                Action::DeleteWordBackward => {
                     self.delete_word_backward();
                     self.search_dirty = true;
+                    handled = true;
                 }
-                'u' => {
+                Action::ClearSearch => {
                     self.query.clear();
                     self.cursor_pos = 0;
                     self.search_dirty = true;
+                    handled = true;
                 }
-                'e' => {
+                Action::ToggleMouseCapture => {
                     self.mouse_captured = !self.mouse_captured;
                     self.mouse_toggle_pending = true;
+                    handled = true;
                 }
-                _ => {}
-            },
-
-            // Resume session
-            KeyCode::Enter => {
-                if let Some(session) = self.selected_session().cloned() {
-                    self.resume_session = Some(session);
-                    self.should_quit = true;
+                Action::TogglePaneFocus => {
+                    if self.show_preview {
+                        self.focused_pane = match self.focused_pane {
+                            FocusedPane::Results => FocusedPane::Preview,
+                            FocusedPane::Preview => FocusedPane::Results,
+                        };
+                    }
+                    handled = true;
                 }
-            }
-
-            // Navigation
-            KeyCode::Down => {
-                self.results_state.select_next(self.filtered.len());
-                self.preview_scroll = 0;
-                self.preview_auto_scroll = true;
-            }
-            KeyCode::Up => {
-                self.results_state.select_prev();
-                self.preview_scroll = 0;
-                self.preview_auto_scroll = true;
-            }
-            KeyCode::PageDown => {
-                self.results_state.page_down(10, self.filtered.len());
-                self.preview_scroll = 0;
-                self.preview_auto_scroll = true;
-            }
-            KeyCode::PageUp => {
-                self.results_state.page_up(10);
-                self.preview_scroll = 0;
-                self.preview_auto_scroll = true;
-            }
-
-            // Tab: cycle agent filter
-            KeyCode::Tab => {
-                self.cycle_agent_filter();
-                self.search_dirty = true;
-            }
-            KeyCode::BackTab if shift => {
-                self.cycle_agent_filter_back();
-                self.search_dirty = true;
-            }
-
-            // Ctrl+Backspace: delete word backward (same as Ctrl+W)
-            KeyCode::Backspace if ctrl => {
-                self.delete_word_backward();
-                self.search_dirty = true;
-            }
-
-            // Search input
-            KeyCode::Backspace => {
-                if self.cursor_pos > 0 {
-                    let prev = self.query[..self.cursor_pos]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    self.query.drain(prev..self.cursor_pos);
-                    self.cursor_pos = prev;
+                Action::CycleDirectoryScope => {
+                    if self.directory_filter.is_some() {
+                        self.directory_scope = match self.directory_scope {
+                            DirectoryScope::Local => DirectoryScope::Project,
+                            DirectoryScope::Project => DirectoryScope::Global,
+                            DirectoryScope::Global => DirectoryScope::Local,
+                        };
+                        self.update_agent_counts();
+                        self.search_dirty = true;
+                    }
+                    handled = true;
+                }
+                Action::CycleAgentFilterForward => {
+                    self.cycle_agent_filter();
                     self.search_dirty = true;
+                    handled = true;
                 }
-            }
-            KeyCode::Left if ctrl => {
-                self.cursor_pos = self.word_boundary_left();
-            }
-            KeyCode::Right if ctrl => {
-                self.cursor_pos = self.word_boundary_right();
-            }
-            KeyCode::Left => {
-                if self.cursor_pos > 0 {
-                    let prev = self.query[..self.cursor_pos]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    self.cursor_pos = prev;
+                Action::CycleAgentFilterBackward => {
+                    self.cycle_agent_filter_back();
+                    self.search_dirty = true;
+                    handled = true;
                 }
-            }
-            KeyCode::Right => {
-                if self.cursor_pos < self.query.len() {
-                    let next = self.query[self.cursor_pos..]
-                        .char_indices()
-                        .nth(1)
-                        .map(|(i, _)| self.cursor_pos + i)
-                        .unwrap_or(self.query.len());
-                    self.cursor_pos = next;
-                }
-            }
-            KeyCode::Home => self.cursor_pos = 0,
-            KeyCode::End => self.cursor_pos = self.query.len(),
 
-            // Typing
-            KeyCode::Char(c) => {
-                self.query.insert(self.cursor_pos, c);
-                self.cursor_pos += c.len_utf8();
-                self.search_dirty = true;
-            }
+                // Results-focused actions
+                Action::NavigateDown if !preview_focused => {
+                    self.navigate_results_next();
+                    handled = true;
+                }
+                Action::NavigateUp if !preview_focused => {
+                    self.navigate_results_prev();
+                    handled = true;
+                }
+                Action::PageDown if !preview_focused => {
+                    self.results_state.page_down(10, self.filtered.len());
+                    self.preview_scroll = 0;
+                    self.preview_auto_scroll = true;
+                    handled = true;
+                }
+                Action::PageUp if !preview_focused => {
+                    self.results_state.page_up(10);
+                    self.preview_scroll = 0;
+                    self.preview_auto_scroll = true;
+                    handled = true;
+                }
+                Action::CursorHome if !preview_focused => {
+                    self.cursor_pos = 0;
+                    handled = true;
+                }
+                Action::CursorEnd if !preview_focused => {
+                    self.cursor_pos = self.query.len();
+                    handled = true;
+                }
+                Action::CursorLeft if !preview_focused => {
+                    if self.cursor_pos > 0 {
+                        let prev = self.query[..self.cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.cursor_pos = prev;
+                    }
+                    handled = true;
+                }
+                Action::CursorRight if !preview_focused => {
+                    if self.cursor_pos < self.query.len() {
+                        let next = self.query[self.cursor_pos..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| self.cursor_pos + i)
+                            .unwrap_or(self.query.len());
+                        self.cursor_pos = next;
+                    }
+                    handled = true;
+                }
+                Action::CursorWordLeft => {
+                    self.cursor_pos = self.word_boundary_left();
+                    handled = true;
+                }
+                Action::CursorWordRight => {
+                    self.cursor_pos = self.word_boundary_right();
+                    handled = true;
+                }
+                Action::DeleteCharBackward if !preview_focused => {
+                    if self.cursor_pos > 0 {
+                        let prev = self.query[..self.cursor_pos]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.query.drain(prev..self.cursor_pos);
+                        self.cursor_pos = prev;
+                        self.search_dirty = true;
+                    }
+                    handled = true;
+                }
+                Action::SwitchToPreview if !preview_focused => {
+                    if self.show_preview {
+                        self.focused_pane = FocusedPane::Preview;
+                    }
+                    handled = true;
+                }
 
-            _ => {}
+                // Preview-focused actions
+                Action::ScrollPreviewDown if preview_focused => {
+                    self.scroll_preview(1);
+                    handled = true;
+                }
+                Action::ScrollPreviewUp if preview_focused => {
+                    self.scroll_preview(-1);
+                    handled = true;
+                }
+                Action::PagePreviewDown if preview_focused => {
+                    self.scroll_preview(10);
+                    handled = true;
+                }
+                Action::PagePreviewUp if preview_focused => {
+                    self.scroll_preview(-10);
+                    handled = true;
+                }
+                Action::ScrollPreviewToTop if preview_focused => {
+                    self.preview_scroll = 0;
+                    handled = true;
+                }
+                Action::ScrollPreviewToBottom if preview_focused => {
+                    let visible = self.preview_area.height.saturating_sub(2) as usize;
+                    self.preview_scroll =
+                        self.preview_total_lines.saturating_sub(visible) as u16;
+                    handled = true;
+                }
+                Action::CopySessionContent if preview_focused => {
+                    if let Some(session) = self.selected_session() {
+                        if super::utils::copy_to_clipboard(&session.content) {
+                            self.status_msg = Some("Copied to clipboard".to_string());
+                        } else {
+                            self.status_msg =
+                                Some("Copy failed (no clipboard tool)".to_string());
+                        }
+                    }
+                    handled = true;
+                }
+                Action::SwitchToResults if preview_focused => {
+                    self.focused_pane = FocusedPane::Results;
+                    handled = true;
+                }
+
+                // Cross-pane shift navigation
+                Action::ShiftDown => {
+                    if preview_focused {
+                        self.navigate_results_next();
+                    } else {
+                        self.scroll_preview(1);
+                    }
+                    handled = true;
+                }
+                Action::ShiftUp => {
+                    if preview_focused {
+                        self.navigate_results_prev();
+                    } else {
+                        self.scroll_preview(-1);
+                    }
+                    handled = true;
+                }
+                Action::ShiftPageDown => {
+                    if preview_focused {
+                        self.results_state.page_down(10, self.filtered.len());
+                        self.preview_scroll = 0;
+                        self.preview_auto_scroll = true;
+                    } else {
+                        self.scroll_preview(10);
+                    }
+                    handled = true;
+                }
+                Action::ShiftPageUp => {
+                    if preview_focused {
+                        self.results_state.page_up(10);
+                        self.preview_scroll = 0;
+                        self.preview_auto_scroll = true;
+                    } else {
+                        self.scroll_preview(-10);
+                    }
+                    handled = true;
+                }
+
+                // Focus-gated actions that don't match current focus → skip
+                _ => {}
+            }
+        }
+
+        // Fallback: if no action handled and it's a plain character, insert into search
+        if !handled
+            && let KeyCode::Char(c) = key.code
+            && !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !preview_focused
+        {
+            self.query.insert(self.cursor_pos, c);
+            self.cursor_pos += c.len_utf8();
+            self.search_dirty = true;
+        }
+    }
+
+    fn navigate_results_next(&mut self) {
+        self.results_state.select_next(self.filtered.len());
+        self.preview_scroll = 0;
+        self.preview_auto_scroll = true;
+    }
+
+    fn navigate_results_prev(&mut self) {
+        self.results_state.select_prev();
+        self.preview_scroll = 0;
+        self.preview_auto_scroll = true;
+    }
+
+    fn scroll_preview(&mut self, delta: i32) {
+        if delta > 0 {
+            self.preview_scroll = self.preview_scroll.saturating_add(delta as u16);
+        } else {
+            self.preview_scroll = self.preview_scroll.saturating_sub((-delta) as u16);
         }
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
-        // Delegate to tui-scrollbar for scrollbar interactions (drag, click, wheel)
-        let handled = self.handle_scrollbar_mouse(mouse);
-        if handled {
+        // For drag events, always delegate to scrollbar (uses widened hit area)
+        if matches!(mouse.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_)) {
+            self.handle_scrollbar_mouse(mouse);
             return;
         }
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                let area = self.results_area;
-                // Check if click is inside results area (skip border + header = +2 rows)
-                let content_y = area.y + 2; // 1 border + 1 header
-                let content_bottom = area.y + area.height.saturating_sub(1); // bottom border
-                if mouse.column >= area.x
-                    && mouse.column < area.x + area.width
-                    && mouse.row >= content_y
-                    && mouse.row < content_bottom
-                {
-                    let row_in_view = (mouse.row - content_y) as usize;
-                    let new_selected = self.results_state.offset + row_in_view;
-                    if new_selected < self.filtered.len() {
-                        self.results_state.selected = new_selected;
-                        self.preview_scroll = 0;
-                        self.preview_auto_scroll = true;
+                // Check if click is exactly on a scrollbar column
+                let on_results_sb = self.results_scrollbar.is_some()
+                    && self.on_scrollbar_column(mouse.column, mouse.row, self.results_sb_area);
+                let on_preview_sb = self.preview_scrollbar.is_some()
+                    && self.on_scrollbar_column(mouse.column, mouse.row, self.preview_sb_area);
+
+                if on_results_sb || on_preview_sb {
+                    // Scrollbar click: delegate to tui-scrollbar (widened for drag tracking)
+                    self.handle_scrollbar_mouse(mouse);
+                    return;
+                }
+
+                // Filter bar click
+                if self.is_in_area(mouse.column, mouse.row, self.filter_bar_area) {
+                    if let Some(agent) = super::filter_bar::filter_hit_test(
+                        mouse.column,
+                        self.filter_bar_area,
+                        &self.agent_counts,
+                        self.total_count,
+                    ) {
+                        self.agent_filter = agent;
+                        self.search_dirty = true;
+                    }
+                    return;
+                }
+
+                // Regular click: switch focus
+                if self.is_in_area(mouse.column, mouse.row, self.preview_area) {
+                    self.focused_pane = FocusedPane::Preview;
+                } else if self.is_in_area(mouse.column, mouse.row, self.results_area) {
+                    self.focused_pane = FocusedPane::Results;
+                    // Select row on click
+                    let area = self.results_area;
+                    let content_y = area.y + 2;
+                    let content_bottom = area.y + area.height.saturating_sub(1);
+                    if mouse.row >= content_y && mouse.row < content_bottom {
+                        let row_in_view = (mouse.row - content_y) as usize;
+                        let new_selected = self.results_state.offset + row_in_view;
+                        if new_selected < self.filtered.len() {
+                            // Double-click detection: resume session
+                            if let Some((last_time, last_idx)) = self.last_click
+                                && last_idx == new_selected
+                                && last_time.elapsed() < Duration::from_millis(400)
+                                && let Some(session) = self.filtered.get(new_selected).cloned()
+                            {
+                                self.resume_session = Some(session);
+                                self.should_quit = true;
+                                return;
+                            }
+                            self.last_click = Some((Instant::now(), new_selected));
+                            self.results_state.selected = new_selected;
+                            self.preview_scroll = 0;
+                            self.preview_auto_scroll = true;
+                        }
                     }
                 }
             }
             MouseEventKind::ScrollDown => {
                 if self.is_in_area(mouse.column, mouse.row, self.preview_area) {
-                    self.preview_scroll = self.preview_scroll.saturating_add(3);
+                    self.preview_scroll = self.preview_scroll.saturating_add(1);
                 } else {
                     self.results_state.select_next(self.filtered.len());
                     self.preview_scroll = 0;
@@ -386,7 +657,7 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 if self.is_in_area(mouse.column, mouse.row, self.preview_area) {
-                    self.preview_scroll = self.preview_scroll.saturating_sub(3);
+                    self.preview_scroll = self.preview_scroll.saturating_sub(1);
                 } else {
                     self.results_state.select_prev();
                     self.preview_scroll = 0;
@@ -397,13 +668,34 @@ impl App {
         }
     }
 
+    /// Widen a 1-column scrollbar area for easier mouse targeting (3 cols).
+    fn widen_hit_area(area: Rect) -> Rect {
+        let expand = 2u16;
+        Rect {
+            x: area.x.saturating_sub(expand),
+            y: area.y,
+            width: area.width + expand,
+            height: area.height,
+        }
+    }
+
     /// Delegate mouse events to tui-scrollbar widgets. Returns true if handled.
+    /// Only forwards click/drag events; scroll wheel is handled by our own logic
+    /// so that hover-based pane detection works correctly.
     fn handle_scrollbar_mouse(&mut self, mouse: MouseEvent) -> bool {
-        // Try results scrollbar
+        // Don't let scrollbar steal scroll wheel events — we handle those ourselves
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) {
+            return false;
+        }
+
+        // Try results scrollbar (wider hit area for easier clicking)
         if let Some(ref sb) = self.results_scrollbar.clone() {
-            let area = self.results_sb_area;
+            let hit_area = Self::widen_hit_area(self.results_sb_area);
             if let Some(ScrollCommand::SetOffset(offset)) =
-                sb.handle_mouse_event(area, mouse, &mut self.results_sb_interaction)
+                sb.handle_mouse_event(hit_area, mouse, &mut self.results_sb_interaction)
             {
                 let visible_rows = self.results_area.height.saturating_sub(3) as usize;
                 let max_offset = self.filtered.len().saturating_sub(visible_rows);
@@ -417,11 +709,11 @@ impl App {
             }
         }
 
-        // Try preview scrollbar
+        // Try preview scrollbar (wider hit area for easier clicking)
         if let Some(ref sb) = self.preview_scrollbar.clone() {
-            let area = self.preview_sb_area;
+            let hit_area = Self::widen_hit_area(self.preview_sb_area);
             if let Some(ScrollCommand::SetOffset(offset)) =
-                sb.handle_mouse_event(area, mouse, &mut self.preview_sb_interaction)
+                sb.handle_mouse_event(hit_area, mouse, &mut self.preview_sb_interaction)
             {
                 self.preview_scroll = offset as u16;
                 return true;
@@ -429,6 +721,17 @@ impl App {
         }
 
         false
+    }
+
+    /// Check if a click is on or near (1 col tolerance) the scrollbar column.
+    fn on_scrollbar_column(&self, col: u16, row: u16, sb_area: Rect) -> bool {
+        if sb_area.width == 0 || sb_area.height == 0 {
+            return false;
+        }
+        row >= sb_area.y
+            && row < sb_area.y + sb_area.height
+            && col >= sb_area.x.saturating_sub(1)
+            && col <= sb_area.x + sb_area.width
     }
 
     fn is_in_area(&self, x: u16, y: u16, area: ratatui::layout::Rect) -> bool {

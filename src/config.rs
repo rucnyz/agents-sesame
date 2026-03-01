@@ -4,6 +4,14 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+/// Serde helper: accepts either a single string or array of strings in TOML.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum KeyOrKeys {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
 pub struct AgentConfig {
     pub color: &'static str,
     pub badge: &'static str,
@@ -139,6 +147,8 @@ pub fn log_file() -> PathBuf {
 pub struct AppConfig {
     #[serde(default)]
     pub agents: HashMap<String, AgentPathConfig>,
+    #[serde(default)]
+    pub keybindings: HashMap<String, KeyOrKeys>,
 }
 
 /// Per-agent path configuration. All fields optional.

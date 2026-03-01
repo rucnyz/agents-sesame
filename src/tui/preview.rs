@@ -19,13 +19,19 @@ pub struct Preview<'a> {
     pub total_lines: &'a mut usize,
     /// Output: physical row of first query match (for auto-scroll).
     pub first_match_row: &'a mut Option<usize>,
+    pub focused: bool,
 }
 
 impl Widget for Preview<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let border_color = if self.focused {
+            Color::Rgb(232, 123, 53)
+        } else {
+            Color::DarkGray
+        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(Style::default().fg(border_color))
             .title(" Preview ");
 
         let Some(session) = self.session else {

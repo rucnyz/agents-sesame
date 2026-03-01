@@ -222,7 +222,6 @@ pub fn highlight_spans(text: &str, query: &str, base_color: Color) -> Vec<Span<'
 }
 
 /// Copy text to clipboard (Linux: wl-copy or xclip).
-#[allow(dead_code)]
 pub fn copy_to_clipboard(text: &str) -> bool {
     // Try wl-copy first (Wayland)
     if let Ok(mut child) = std::process::Command::new("wl-copy")
