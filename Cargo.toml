@@ -1,6 +1,6 @@
 [package]
 name = "agents-sesame"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Fast fuzzy finder TUI for coding agent session history"
 license = "MIT"
