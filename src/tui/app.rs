@@ -325,11 +325,20 @@ impl App {
                     .collect();
             }
         } else {
+            let search_limit = match self.agent_filter.as_deref() {
+                Some(a) => self
+                    .agent_counts
+                    .get(a)
+                    .copied()
+                    .unwrap_or(self.total_count),
+                None => self.total_count,
+            }
+            .max(1);
             let scored_results = self.search_engine.search(
                 &self.query,
                 self.agent_filter.as_deref(),
                 effective_dir,
-                self.sessions.len().max(1),
+                search_limit,
             );
             self.search_scores.clear();
             self.filtered = scored_results
