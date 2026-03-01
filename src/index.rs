@@ -316,7 +316,6 @@ impl TantivyIndex {
         directory_filter: Option<&Filter>,
         date_filter: Option<&DateFilter>,
         limit: usize,
-        sort_by_time: bool,
     ) -> Vec<(String, f64)> {
         let searcher = self.searcher();
         let index = self.index.as_ref().unwrap();
@@ -359,8 +358,8 @@ impl TantivyIndex {
             Box::new(BooleanQuery::new(must_clauses))
         };
 
-        // Sort by time or relevance
-        if sort_by_time || query_text.is_empty() {
+        // Use BM25 relevance scoring when there's a query, time sort otherwise
+        if query_text.is_empty() {
             let collector =
                 TopDocs::with_limit(limit).order_by_fast_field::<f64>("timestamp", Order::Desc);
             match searcher.search(&*final_query, &collector) {

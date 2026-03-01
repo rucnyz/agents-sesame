@@ -3,8 +3,6 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
-use unicode_width::UnicodeWidthChar;
-
 use crate::config;
 use crate::session::Session;
 
@@ -13,14 +11,17 @@ use super::utils::highlight_spans;
 
 pub struct Preview<'a> {
     pub session: Option<&'a Session>,
-    pub scroll: u16,
+    /// Mutable scroll: may be updated by auto-scroll before rendering.
+    pub scroll: &'a mut u16,
+    /// If true, auto-scroll to first match before rendering (reset to false).
+    pub auto_scroll: &'a mut bool,
     pub query: &'a str,
     /// Output: physical row positions (pre-scroll, accounting for wrap) for icon overlay.
     pub badge_lines: &'a mut Vec<usize>,
     /// Output: total physical rows (for scrollbar).
     pub total_lines: &'a mut usize,
-    /// Output: physical row of first query match (for auto-scroll).
-    pub first_match_row: &'a mut Option<usize>,
+    /// Output: the clamped scroll value actually used for rendering.
+    pub rendered_scroll: &'a mut u16,
     pub focused: bool,
     pub theme: &'a Theme,
 }
@@ -77,12 +78,26 @@ impl Widget for Preview<'_> {
         }
         *self.badge_lines = physical_badge_positions;
         *self.total_lines = physical_row;
-        *self.first_match_row = first_match_physical;
+
+        // Auto-scroll to first match BEFORE rendering (so first frame is correct)
+        if *self.auto_scroll {
+            *self.auto_scroll = false;
+            if let Some(match_row) = first_match_physical {
+                *self.scroll = match_row.saturating_sub(3) as u16;
+            }
+        }
+
+        // Clamp scroll so it never exceeds content (prevents blank preview after resize)
+        let visible_height = block.inner(area).height as usize;
+        let max_scroll = physical_row.saturating_sub(visible_height) as u16;
+        let scroll = (*self.scroll).min(max_scroll);
+        *self.scroll = scroll;
+        *self.rendered_scroll = scroll;
 
         let paragraph = Paragraph::new(lines)
             .block(block)
             .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
+            .scroll((scroll, 0));
 
         paragraph.render(area, buf);
     }
@@ -230,29 +245,14 @@ fn build_preview_lines(
 }
 
 /// Count physical rows a Line occupies when wrapped to `max_width` cells,
-/// matching ratatui's `Wrap { trim: false }` behavior: wide chars that don't
-/// fit on the current row start a new row instead of being split.
+/// using ratatui's own Paragraph::line_count to match Wrap { trim: false } exactly.
 fn wrapped_line_count(line: &Line, max_width: usize) -> usize {
     if max_width == 0 {
         return 1;
     }
-    let mut rows: usize = 1;
-    let mut col: usize = 0;
-    for span in &line.spans {
-        for ch in span.content.chars() {
-            let w = ch.width().unwrap_or(0);
-            if w == 0 {
-                continue;
-            }
-            if col + w > max_width && col > 0 {
-                rows += 1;
-                col = w;
-            } else {
-                col += w;
-            }
-        }
-    }
-    rows
+    let text = ratatui::text::Text::from(line.clone());
+    let p = Paragraph::new(text).wrap(Wrap { trim: false });
+    p.line_count(max_width as u16).max(1)
 }
 
 fn parse_hex_color(hex: &str) -> Color {
@@ -318,46 +318,41 @@ mod tests {
 
     #[test]
     fn wrap_double_width_boundary() {
-        // 5 Chinese chars = 10 cells, width 9 → the 5th char (col 8+2=10 > 9) wraps
-        // Row 1: 4 chars (8 cells), Row 2: 1 char (2 cells) → 2 rows
+        // 5 CJK chars = 10 cells, width 9 — single word, ratatui word-wraps
+        // at width 9 the word barely overflows → 1 rendered line (clipped)
         let line = line_from("你好世界啊");
-        assert_eq!(wrapped_line_count(&line, 9), 2);
+        assert_eq!(wrapped_line_count(&line, 9), 1);
     }
 
     #[test]
     fn wrap_double_width_odd_boundary() {
-        // 3 Chinese chars = 6 cells, width 5
-        // Row 1: 2 chars (4 cells), can't fit 3rd (4+2=6 > 5) → wrap
-        // Row 2: 1 char (2 cells) → 2 rows
+        // 3 CJK chars = 6 cells, width 5 — single word, barely overflows
         let line = line_from("你好世");
-        assert_eq!(wrapped_line_count(&line, 5), 2);
+        assert_eq!(wrapped_line_count(&line, 5), 1);
     }
 
     #[test]
     fn wrap_mixed_ascii_cjk() {
-        // "a你b" = 1 + 2 + 1 = 4 cells, width 3
-        // Row 1: 'a' (1 cell), '你' (1+2=3, fits) → 3 cells
-        // Row 2: 'b' (1 cell) → 2 rows
+        // "a你b" = 4 cells, width 3 — single word character-wrapped:
+        // Row 1: "a你" (3 cells), Row 2: "b" (1 cell) → 2 rows
         let line = line_from("a你b");
         assert_eq!(wrapped_line_count(&line, 3), 2);
     }
 
     #[test]
     fn wrap_cjk_pushes_to_next_row() {
-        // "ab你" = 1 + 1 + 2 = 4 cells, width 3
-        // Row 1: 'a' (1), 'b' (2), '你' would be 2+2=4 > 3 → wrap
-        // Row 2: '你' (2) → 2 rows
+        // "ab你" = 4 cells, width 3 — single word, overflows → 1 line (clipped)
         let line = line_from("ab你");
-        assert_eq!(wrapped_line_count(&line, 3), 2);
+        assert_eq!(wrapped_line_count(&line, 3), 1);
     }
 
     #[test]
     fn wrap_multiple_spans() {
-        // "» " (2 cells) + "你好世界" (8 cells) = 10 cells, width 6
-        // Row 1: '»' (1) + ' ' (2) + '你' (4) + '好' would be 4+2=6, fits → 6 cells
-        // Row 2: '世' (2) + '界' (4) → 4 cells → 2 rows
+        // "» " + "你好世界" with width 6 — word wrapping:
+        // word "»" (1 cell) + ws " " (1 cell), word "你好世界" (8 cells)
+        // Row 1: "»" (1), Row 2: "你好世" (6), Row 3: "界" (2) → 3 rows
         let line = styled_line(vec![("» ", Color::Cyan), ("你好世界", Color::White)]);
-        assert_eq!(wrapped_line_count(&line, 6), 2);
+        assert_eq!(wrapped_line_count(&line, 6), 3);
     }
 
     #[test]
@@ -391,15 +386,10 @@ mod tests {
 
     #[test]
     fn wrap_width_1_cjk() {
-        // Each CJK char is 2 cells wide, but width is 1
-        // '你': col=0, 0+2=2 > 1, so wrap → row 2, col=2
-        // But col=2 > 1, so this is tricky... Actually:
-        // Start: rows=1, col=0
-        // '你': w=2, col(0)+2=2 > 1, rows=2, col=2
-        // '好': w=2, col(2)+2=4 > 1, rows=3, col=2
-        // Each CJK char wraps to its own row
+        // CJK chars are 2 cells wide, wider than max_width=1
+        // ratatui's WordWrapper skips chars wider than the line → 1 empty line
         let line = line_from("你好世");
-        assert_eq!(wrapped_line_count(&line, 1), 3);
+        assert_eq!(wrapped_line_count(&line, 1), 1);
     }
 
     #[test]

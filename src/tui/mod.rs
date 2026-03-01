@@ -9,7 +9,10 @@ pub mod utils;
 
 use std::io;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -73,6 +76,13 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    // Enable enhanced keyboard protocol (kitty level 1) so Ctrl+Backspace
+    // is properly distinguished from plain Backspace. Terminals that don't
+    // support it silently ignore this escape sequence.
+    let _ = execute!(
+        stdout,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -102,6 +112,7 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     let result = run_loop(&mut terminal, &mut app);
 
     // Restore terminal
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -149,6 +160,9 @@ fn run_loop(
         let current_size = terminal.size()?;
         if current_size != last_size {
             last_size = current_size;
+            if !app.query.is_empty() {
+                app.preview_auto_scroll = true;
+            }
             needs_redraw = true;
         }
 
@@ -207,6 +221,7 @@ fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let count = app.filtered.len();
     let total = app.total_count;
     let sort_label = match app.sort_column {
+        app::SortColumn::Relevance => "relevance",
         app::SortColumn::Date => "date",
         app::SortColumn::Agent => "agent",
         app::SortColumn::Title => "title",
@@ -362,14 +377,15 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 
         let mut badge_lines = Vec::new();
         let mut total_lines: usize = 0;
-        let mut first_match_row: Option<usize> = None;
+        let mut rendered_scroll: u16 = 0;
         let preview = Preview {
             session: selected,
-            scroll: app.preview_scroll,
+            scroll: &mut app.preview_scroll,
+            auto_scroll: &mut app.preview_auto_scroll,
             query: &app.query,
             badge_lines: &mut badge_lines,
             total_lines: &mut total_lines,
-            first_match_row: &mut first_match_row,
+            rendered_scroll: &mut rendered_scroll,
             focused: app.focused_pane == FocusedPane::Preview,
             theme: &app.theme,
         };
@@ -378,15 +394,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         // Store total lines for scrollbar drag calculation
         app.preview_total_lines = total_lines;
 
-        // Auto-scroll to first match if needed
         let preview_visible = chunks[1].height.saturating_sub(2) as usize;
-        if app.preview_auto_scroll {
-            app.preview_auto_scroll = false;
-            if let Some(match_row) = first_match_row {
-                // Scroll so the match is ~3 lines from the top
-                app.preview_scroll = match_row.saturating_sub(3) as u16;
-            }
-        }
 
         // Preview scrollbar (tui-scrollbar with fractional thumb)
         if total_lines > preview_visible {
@@ -414,7 +422,7 @@ fn draw_content(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
         // Overlay agent icons on preview badge lines
         if let Some(session) = selected {
             let agent = session.agent.clone();
-            draw_preview_icons(f, chunks[1], &badge_lines, app.preview_scroll, &agent, app);
+            draw_preview_icons(f, chunks[1], &badge_lines, rendered_scroll, &agent, app);
         }
     } else {
         results_area = area;

@@ -106,6 +106,18 @@ install_cargo() {
     success "$BINARY installed via cargo!"
 }
 
+setup_shell() {
+    FRRS="$HOME/.local/bin/$BINARY"
+    if [[ ! -x "$FRRS" ]]; then
+        FRRS=$(command -v "$BINARY" 2>/dev/null || true)
+    fi
+    if [[ -n "$FRRS" ]]; then
+        echo ""
+        info "Setting up shell integration..."
+        "$FRRS" init && success "Shell integration configured" || info "Run 'fr-rs init' manually to set up shell integration"
+    fi
+}
+
 main() {
     echo "$BINARY install script"
     echo "========================"
@@ -115,6 +127,8 @@ main() {
 
     # Prefer binary download, fallback to cargo
     install_binary || install_cargo
+
+    setup_shell
 }
 
 trap 'echo ""; error "Cancelled"' INT

@@ -47,6 +47,11 @@ fr-rs --list --format=tsv      # Tab-delimited output
 fr-rs --list --format=json     # JSON lines (one object per line)
 fr-rs --preview <session-id>   # Print session content to stdout
 fr-rs --resume <session-id>    # Resume session directly by ID
+
+# Management
+fr-rs init                     # Set up shell integration (Alt+G + completions)
+fr-rs update                   # Self-update to latest release
+fr-rs uninstall                # Remove binary, config, cache, and shell integration
 ```
 
 ## Keybindings
@@ -103,6 +108,15 @@ error = "#FF0000"                # error color
 ```
 
 All fields are optional — unset values use built-in defaults.
+
+## Shell Integration
+
+Set up <kbd>Alt+G</kbd> keybinding and tab completions:
+
+```sh
+fr-rs init               # auto-detect shell, writes to config
+fr-rs init fish          # explicit shell
+```
 
 ## Integrations
 

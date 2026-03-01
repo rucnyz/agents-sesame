@@ -158,14 +158,14 @@ impl SessionSearch {
     }
 
     /// Search sessions with query and filters.
+    /// Returns sessions paired with their BM25 relevance scores.
     pub fn search(
         &mut self,
         query: &str,
         agent_filter: Option<&str>,
         directory_filter: Option<&str>,
         limit: usize,
-        sort_by_time: bool,
-    ) -> Vec<Session> {
+    ) -> Vec<(Session, f64)> {
         let parsed = parse_query(query);
 
         let effective_agent = if let Some(agent) = agent_filter {
@@ -192,12 +192,13 @@ impl SessionSearch {
             effective_dir.as_ref(),
             parsed.date.as_ref(),
             limit,
-            sort_by_time,
         );
 
         results
             .into_iter()
-            .filter_map(|(id, _)| self.sessions_by_id.get(&id).cloned())
+            .filter_map(|(id, score)| {
+                self.sessions_by_id.get(&id).map(|s| (s.clone(), score))
+            })
             .collect()
     }
 

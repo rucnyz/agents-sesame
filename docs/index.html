@@ -136,9 +136,14 @@ fr-rs --resume &lt;session-id&gt;    # Resume session directly by ID
 
 # Other
 fr-rs --stats                  # Show index stats
-fr-rs --update                 # Self-update to latest release</code></pre>
+fr-rs update                   # Self-update to latest release</code></pre>
 
 <p>See <a href="integrations.html">Integrations</a> for fzf, television, and matugen setup guides.</p>
+
+<h2>Shell Integration</h2>
+<p>Set up <kbd>Alt+G</kbd> keybinding and tab completions:</p>
+<pre><code>fr-rs init               # auto-detect shell, writes to config
+fr-rs init fish          # explicit shell</code></pre>
 
 <h2>Configuration</h2>
 <p>Optional config at <code>~/.config/rust-resume/config.toml</code>. All keybindings are configurable:</p>

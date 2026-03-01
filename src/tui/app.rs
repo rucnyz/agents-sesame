@@ -22,6 +22,8 @@ pub enum FocusedPane {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortColumn {
+    /// Sort by BM25 relevance (when query active) or Date (when no query).
+    Relevance,
     Agent,
     Title,
     Directory,
@@ -109,6 +111,10 @@ pub struct App {
     pub keybindings: KeyBindings,
     /// Resolved theme colors.
     pub theme: Theme,
+    /// BM25 relevance scores from the last search (id → score).
+    search_scores: HashMap<String, f64>,
+    /// Whether query was empty on last apply_filter (for detecting transitions).
+    prev_query_empty: bool,
 }
 
 impl App {
@@ -156,6 +162,8 @@ impl App {
             loading_rx: None,
             keybindings,
             theme,
+            search_scores: HashMap::new(),
+            prev_query_empty: true,
         }
     }
 
@@ -255,24 +263,42 @@ impl App {
         let scope = self.directory_scope;
         let dir_filter = self.directory_filter.clone();
 
-        // Use Tantivy time sort only when sorting by Date with a query
-        let use_tantivy_time_sort = self.sort_column == SortColumn::Date && !self.query.is_empty();
+        let has_query = !self.query.is_empty();
 
-        if self.query.is_empty() {
+        // Auto-switch sort mode only on query state transitions:
+        // - empty → non-empty: switch to Relevance
+        // - non-empty → empty: switch back to Date
+        if has_query && self.prev_query_empty {
+            self.sort_column = SortColumn::Relevance;
+        } else if !has_query && !self.prev_query_empty {
+            self.sort_column = SortColumn::Date;
+            self.sort_direction = SortDirection::Desc;
+        }
+        self.prev_query_empty = !has_query;
+
+        if !has_query {
             self.filtered = self.sessions.clone();
+            self.search_scores.clear();
             if let Some(ref agent) = self.agent_filter {
                 self.filtered.retain(|s| &s.agent == agent);
             }
             self.filtered
                 .retain(|s| Self::session_matches_scope(s, scope, dir_filter.as_deref()));
         } else {
-            self.filtered = self.search_engine.search(
+            let scored_results = self.search_engine.search(
                 &self.query,
                 self.agent_filter.as_deref(),
                 effective_dir,
                 200,
-                use_tantivy_time_sort,
             );
+            self.search_scores.clear();
+            self.filtered = scored_results
+                .into_iter()
+                .map(|(session, score)| {
+                    self.search_scores.insert(session.id.clone(), score);
+                    session
+                })
+                .collect();
             // search engine uses "contains" — for Local mode, further filter to exact
             if scope == DirectoryScope::Local {
                 self.filtered
@@ -280,64 +306,58 @@ impl App {
             }
         }
 
-        // Apply in-memory sort (Date with query uses Tantivy's fast field)
+        // Sort results.
+        // - Relevance mode: BM25 score (with query) or Date desc (without query)
+        // - Column mode: chosen column primary, BM25 tiebreaker (with query)
         let dir = self.sort_direction;
+        let scores = &self.search_scores;
+
         match self.sort_column {
-            SortColumn::Date if use_tantivy_time_sort && dir == SortDirection::Desc => {
-                // Tantivy already sorted desc
+            SortColumn::Relevance => {
+                if has_query {
+                    // Pure BM25 relevance sort
+                    self.filtered.sort_by(|a, b| {
+                        let sa = scores.get(&a.id).copied().unwrap_or(0.0);
+                        let sb = scores.get(&b.id).copied().unwrap_or(0.0);
+                        sb.total_cmp(&sa)
+                    });
+                } else {
+                    // No query — fall back to Date desc
+                    self.filtered
+                        .sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
+                }
             }
-            SortColumn::Date if use_tantivy_time_sort && dir == SortDirection::Asc => {
-                self.filtered.reverse();
-            }
-            SortColumn::Date => {
-                self.filtered.sort_by(|a, b| {
-                    let cmp = a.mtime.total_cmp(&b.mtime);
+            _ => {
+                let column_cmp = |a: &Session, b: &Session| -> std::cmp::Ordering {
+                    let cmp = match self.sort_column {
+                        SortColumn::Date => a.mtime.total_cmp(&b.mtime),
+                        SortColumn::Agent => a.agent.cmp(&b.agent),
+                        SortColumn::Title => a.title.cmp(&b.title),
+                        SortColumn::Directory => a.directory.cmp(&b.directory),
+                        SortColumn::Turns => a.message_count.cmp(&b.message_count),
+                        SortColumn::Relevance => unreachable!(),
+                    };
                     if dir == SortDirection::Desc {
                         cmp.reverse()
                     } else {
                         cmp
                     }
-                });
-            }
-            SortColumn::Agent => {
-                self.filtered.sort_by(|a, b| {
-                    let cmp = a.agent.cmp(&b.agent);
-                    if dir == SortDirection::Desc {
-                        cmp.reverse()
-                    } else {
-                        cmp
-                    }
-                });
-            }
-            SortColumn::Title => {
-                self.filtered.sort_by(|a, b| {
-                    let cmp = a.title.cmp(&b.title);
-                    if dir == SortDirection::Desc {
-                        cmp.reverse()
-                    } else {
-                        cmp
-                    }
-                });
-            }
-            SortColumn::Directory => {
-                self.filtered.sort_by(|a, b| {
-                    let cmp = a.directory.cmp(&b.directory);
-                    if dir == SortDirection::Desc {
-                        cmp.reverse()
-                    } else {
-                        cmp
-                    }
-                });
-            }
-            SortColumn::Turns => {
-                self.filtered.sort_by(|a, b| {
-                    let cmp = a.message_count.cmp(&b.message_count);
-                    if dir == SortDirection::Desc {
-                        cmp.reverse()
-                    } else {
-                        cmp
-                    }
-                });
+                };
+
+                if has_query {
+                    // Column primary, BM25 tiebreaker
+                    self.filtered.sort_by(|a, b| {
+                        let primary = column_cmp(a, b);
+                        if primary != std::cmp::Ordering::Equal {
+                            return primary;
+                        }
+                        let sa = scores.get(&a.id).copied().unwrap_or(0.0);
+                        let sb = scores.get(&b.id).copied().unwrap_or(0.0);
+                        sb.total_cmp(&sa)
+                    });
+                } else {
+                    self.filtered.sort_by(column_cmp);
+                }
             }
         }
 
@@ -352,14 +372,24 @@ impl App {
     /// if different column, switch to it with a sensible default direction.
     pub fn toggle_sort_column(&mut self, column: SortColumn) {
         if self.sort_column == column {
-            // Flip direction
-            self.sort_direction = match self.sort_direction {
-                SortDirection::Asc => SortDirection::Desc,
-                SortDirection::Desc => SortDirection::Asc,
+            // Cycle: default direction → flipped → reset to Relevance
+            let default_dir = match column {
+                SortColumn::Date | SortColumn::Turns => SortDirection::Desc,
+                _ => SortDirection::Asc,
             };
+            if self.sort_direction == default_dir {
+                // First click was default → flip
+                self.sort_direction = match default_dir {
+                    SortDirection::Asc => SortDirection::Desc,
+                    SortDirection::Desc => SortDirection::Asc,
+                };
+            } else {
+                // Already flipped → reset to Relevance
+                self.sort_column = SortColumn::Relevance;
+                self.sort_direction = SortDirection::Desc;
+            }
         } else {
             self.sort_column = column;
-            // Default direction: Date/Turns desc (newest/most first), others asc (A-Z)
             self.sort_direction = match column {
                 SortColumn::Date | SortColumn::Turns => SortDirection::Desc,
                 _ => SortDirection::Asc,
@@ -390,6 +420,9 @@ impl App {
                     }
                 }
                 Event::Resize(..) => {
+                    if !self.query.is_empty() {
+                        self.preview_auto_scroll = true;
+                    }
                     needs_redraw = true;
                 }
                 _ => {}
@@ -435,7 +468,19 @@ impl App {
                     handled = true;
                 }
                 Action::ToggleSort => {
-                    self.toggle_sort_column(SortColumn::Date);
+                    if !self.query.is_empty() {
+                        // With query: toggle Relevance ↔ Date
+                        if self.sort_column == SortColumn::Relevance {
+                            self.sort_column = SortColumn::Date;
+                            self.sort_direction = SortDirection::Desc;
+                        } else {
+                            self.sort_column = SortColumn::Relevance;
+                        }
+                    } else {
+                        // No query: toggle Date direction
+                        self.toggle_sort_column(SortColumn::Date);
+                    }
+                    self.search_dirty = true;
                     handled = true;
                 }
                 Action::DeleteWordBackward => {
@@ -859,50 +904,18 @@ impl App {
     }
 
     fn word_boundary_left(&self) -> usize {
-        if self.cursor_pos == 0 {
-            return 0;
-        }
-        let text = &self.query[..self.cursor_pos];
-        // Skip trailing whitespace, then skip word chars
-        let trimmed = text.trim_end();
-        if trimmed.is_empty() {
-            return 0;
-        }
-        trimmed
-            .rfind(|c: char| c.is_whitespace())
-            .map(|i| i + 1)
-            .unwrap_or(0)
+        find_prev_word_start(&self.query, self.cursor_pos)
     }
 
     fn word_boundary_right(&self) -> usize {
-        if self.cursor_pos >= self.query.len() {
-            return self.query.len();
-        }
-        let text = &self.query[self.cursor_pos..];
-        // Skip leading whitespace, then skip word chars
-        let after_space = text.trim_start();
-        let space_len = text.len() - after_space.len();
-        let word_end = after_space
-            .find(|c: char| c.is_whitespace())
-            .unwrap_or(after_space.len());
-        self.cursor_pos + space_len + word_end
+        find_next_word_end(&self.query, self.cursor_pos)
     }
 
     fn delete_word_backward(&mut self) {
         if self.cursor_pos == 0 {
             return;
         }
-        let text = &self.query[..self.cursor_pos];
-        let trimmed = text.trim_end();
-        if trimmed.is_empty() {
-            self.query.drain(..self.cursor_pos);
-            self.cursor_pos = 0;
-            return;
-        }
-        let boundary = trimmed
-            .rfind(|c: char| c.is_whitespace())
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let boundary = find_prev_word_start(&self.query, self.cursor_pos);
         self.query.drain(boundary..self.cursor_pos);
         self.cursor_pos = boundary;
     }
@@ -955,4 +968,141 @@ impl App {
         agents.sort();
         agents
     }
+}
+
+// ---------------------------------------------------------------------------
+// CJK-aware word boundary helpers (jieba for Han, script-class for others)
+// Ported from fast-resume's SmartInput._find_prev_word_start
+// ---------------------------------------------------------------------------
+
+use std::sync::LazyLock;
+static JIEBA: LazyLock<jieba_rs::Jieba> = LazyLock::new(jieba_rs::Jieba::new);
+
+/// CJK ideographs only (the subset jieba can segment).
+fn is_han(c: char) -> bool {
+    matches!(c as u32,
+        0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x20000..=0x2A6DF | 0xF900..=0xFAFF
+    )
+}
+
+#[derive(PartialEq)]
+enum CharClass {
+    Space,
+    Han,
+    Hiragana,
+    Katakana,
+    Hangul,
+    Alpha,
+    Punct,
+}
+
+fn char_class(c: char) -> CharClass {
+    if c.is_whitespace() {
+        return CharClass::Space;
+    }
+    if is_han(c) {
+        return CharClass::Han;
+    }
+    let cp = c as u32;
+    if (0x3040..=0x309F).contains(&cp) {
+        return CharClass::Hiragana;
+    }
+    if (0x30A0..=0x30FF).contains(&cp) {
+        return CharClass::Katakana;
+    }
+    if (0xAC00..=0xD7AF).contains(&cp) || (0x1100..=0x11FF).contains(&cp) {
+        return CharClass::Hangul;
+    }
+    if c.is_alphanumeric() || c == '_' {
+        return CharClass::Alpha;
+    }
+    CharClass::Punct
+}
+
+/// Find byte position of previous word start (for Ctrl+W / Ctrl+Backspace / Ctrl+Left).
+fn find_prev_word_start(text: &str, byte_pos: usize) -> usize {
+    let text = &text[..byte_pos];
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    let last_char = trimmed.chars().next_back().unwrap();
+
+    if is_han(last_char) {
+        // Find extent of Han run backwards
+        let cjk_end = trimmed.len();
+        let mut cjk_start = 0;
+        for (i, c) in trimmed.char_indices().rev() {
+            if !is_han(c) {
+                cjk_start = i + c.len_utf8();
+                break;
+            }
+        }
+        // Segment with jieba, walk tokens to find boundary
+        let cjk_text = &trimmed[cjk_start..cjk_end];
+        let tokens = JIEBA.cut(cjk_text, false);
+        let mut offset = cjk_start;
+        for token in &tokens {
+            let token_end = offset + token.len();
+            if token_end >= cjk_end {
+                return offset;
+            }
+            offset = token_end;
+        }
+        return cjk_start;
+    }
+
+    // Non-Han: script-boundary approach
+    let cls = char_class(last_char);
+    trimmed
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| {
+            let cc = char_class(c);
+            cc != cls || cc == CharClass::Space || cc == CharClass::Punct
+        })
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0)
+}
+
+/// Find byte position of next word end (for Ctrl+Right).
+fn find_next_word_end(text: &str, byte_pos: usize) -> usize {
+    let rest = &text[byte_pos..];
+    let after_space = rest.trim_start();
+    let space_len = rest.len() - after_space.len();
+
+    if after_space.is_empty() {
+        return text.len();
+    }
+
+    let first_char = after_space.chars().next().unwrap();
+
+    if is_han(first_char) {
+        // Find extent of Han run forwards
+        let mut cjk_len = 0;
+        for c in after_space.chars() {
+            if !is_han(c) {
+                break;
+            }
+            cjk_len += c.len_utf8();
+        }
+        let tokens = JIEBA.cut(&after_space[..cjk_len], false);
+        if let Some(first_token) = tokens.first() {
+            return byte_pos + space_len + first_token.len();
+        }
+        return byte_pos + space_len + cjk_len;
+    }
+
+    // Non-Han: script-boundary approach
+    let cls = char_class(first_char);
+    let end = after_space
+        .char_indices()
+        .find(|&(_, c)| {
+            let cc = char_class(c);
+            cc != cls || cc == CharClass::Space || cc == CharClass::Punct
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(after_space.len());
+    byte_pos + space_len + end
 }
