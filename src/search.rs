@@ -12,6 +12,8 @@ use crate::session::Session;
 
 pub enum LoadingMsg {
     Sessions(Vec<Session>),
+    /// Currently scanning this adapter (name, index, total).
+    Scanning(String, usize, usize),
     Done(Box<SessionSearch>),
 }
 
@@ -281,6 +283,11 @@ impl SessionSearch {
         // Process each adapter and send updates
         let adapter_count = self.adapters.len();
         for i in 0..adapter_count {
+            let _ = tx.send(LoadingMsg::Scanning(
+                self.adapters[i].name().to_string(),
+                i,
+                adapter_count,
+            ));
             let (new_sessions, deleted) =
                 self.adapters[i].find_sessions_incremental(&known, &None, &None);
             let has_changes = !new_sessions.is_empty() || !deleted.is_empty();

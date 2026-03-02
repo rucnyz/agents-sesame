@@ -43,31 +43,47 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     let kb = keybindings::KeyBindings::load(&cfg.keybindings);
     let theme = Theme::from_config(&cfg.theme);
 
-    // On first run, block until at least one adapter finishes before entering TUI.
-    // This way the user sees the progress message in the normal terminal.
+    // On first run, block with progress bar until all adapters finish.
     let preloaded = if first_run {
         use crate::search::{LoadingMsg, SessionSearch};
-        eprint!("Building session index for the first time, this may take a moment...");
+        use indicatif::{ProgressBar, ProgressStyle};
+
+        let pb = ProgressBar::new(10); // adapter count, will be updated
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("Building index: {msg} [{bar:30}] {pos}/{len}")
+                .unwrap()
+                .progress_chars("=> "),
+        );
+
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut engine = SessionSearch::new();
             engine.load_progressive(false, &tx);
             let _ = tx.send(LoadingMsg::Done(Box::new(engine)));
         });
-        // Wait for the first batch of sessions (one adapter completed)
-        let mut first_sessions = Vec::new();
+
+        let mut all_sessions = Vec::new();
         let mut done_engine = None;
-        match rx.recv() {
-            Ok(LoadingMsg::Sessions(sessions)) => {
-                first_sessions = sessions;
+        loop {
+            match rx.recv() {
+                Ok(LoadingMsg::Scanning(name, idx, total)) => {
+                    pb.set_length(total as u64);
+                    pb.set_position(idx as u64);
+                    pb.set_message(name);
+                }
+                Ok(LoadingMsg::Sessions(sessions)) => {
+                    all_sessions = sessions;
+                }
+                Ok(LoadingMsg::Done(engine)) => {
+                    done_engine = Some(engine);
+                    break;
+                }
+                Err(_) => break,
             }
-            Ok(LoadingMsg::Done(engine)) => {
-                done_engine = Some(engine);
-            }
-            Err(_) => {}
         }
-        eprintln!(" done.");
-        Some((first_sessions, done_engine, rx))
+        pb.finish_and_clear();
+        Some((all_sessions, done_engine, rx))
     } else {
         None
     };

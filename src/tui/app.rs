@@ -211,6 +211,9 @@ impl App {
                     self.update_agent_counts();
                     got_update = true;
                 }
+                Ok(LoadingMsg::Scanning(..)) => {
+                    // Progress info only used by first-run pre-TUI spinner
+                }
                 Ok(LoadingMsg::Done(engine)) => {
                     done_engine = Some(*engine);
                     got_update = true;
