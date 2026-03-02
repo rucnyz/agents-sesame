@@ -505,6 +505,10 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
     use std::io::Write;
 
     let start = std::time::Instant::now();
+    let cfg = crate::config::AppConfig::load();
+    let search_limit_cap = cfg
+        .search_limit
+        .unwrap_or(crate::config::DEFAULT_SEARCH_LIMIT);
     let mut engine = SessionSearch::new();
     let has_query = cli.query.as_ref().is_some_and(|q| !q.is_empty());
 
@@ -518,7 +522,7 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
                         query,
                         cli.agent.as_deref(),
                         cli.directory.as_deref(),
-                        sessions.len().max(1),
+                        sessions.len().min(search_limit_cap).max(1),
                     )
                     .into_iter()
                     .map(|(s, _)| s)

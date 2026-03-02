@@ -513,32 +513,41 @@ impl TantivyIndex {
             Box::new(BooleanQuery::new(must_clauses))
         };
 
-        // Use BM25 relevance scoring when there's a query, time sort otherwise
+        // Use BM25 relevance scoring when there's a query, time sort otherwise.
+        // Read IDs from fast fields (column-oriented) instead of stored fields.
         if query_text.is_empty() {
             let collector =
                 TopDocs::with_limit(limit).order_by_fast_field::<f64>("timestamp", Order::Desc);
             match searcher.search(&*final_query, &collector) {
-                Ok(results) => results
-                    .into_iter()
-                    .filter_map(|(_, addr)| {
-                        let doc = searcher.doc::<tantivy::TantivyDocument>(addr).ok()?;
-                        let id = doc.get_first(self.f_id)?.as_str()?.to_string();
-                        Some((id, 0.0))
-                    })
-                    .collect(),
+                Ok(results) => {
+                    let mut buf = String::new();
+                    results
+                        .into_iter()
+                        .filter_map(|(_, addr)| {
+                            let seg = searcher.segment_reader(addr.segment_ord);
+                            let id_col = seg.fast_fields().str("id").ok()??;
+                            Self::read_str(&id_col, addr.doc_id, &mut buf)?;
+                            Some((buf.clone(), 0.0))
+                        })
+                        .collect()
+                }
                 Err(_) => vec![],
             }
         } else {
             let collector = TopDocs::with_limit(limit);
             match searcher.search(&*final_query, &collector) {
-                Ok(results) => results
-                    .into_iter()
-                    .filter_map(|(score, addr)| {
-                        let doc = searcher.doc::<tantivy::TantivyDocument>(addr).ok()?;
-                        let id = doc.get_first(self.f_id)?.as_str()?.to_string();
-                        Some((id, score as f64))
-                    })
-                    .collect(),
+                Ok(results) => {
+                    let mut buf = String::new();
+                    results
+                        .into_iter()
+                        .filter_map(|(score, addr)| {
+                            let seg = searcher.segment_reader(addr.segment_ord);
+                            let id_col = seg.fast_fields().str("id").ok()??;
+                            Self::read_str(&id_col, addr.doc_id, &mut buf)?;
+                            Some((buf.clone(), score as f64))
+                        })
+                        .collect()
+                }
                 Err(_) => vec![],
             }
         }

@@ -117,10 +117,12 @@ pub struct App {
     search_scores: HashMap<String, f64>,
     /// Whether query was empty on last apply_filter (for detecting transitions).
     prev_query_empty: bool,
+    /// Max search results returned per query (configurable via config.toml).
+    search_limit_cap: usize,
 }
 
 impl App {
-    pub fn new(yolo: bool, keybindings: KeyBindings, theme: Theme) -> Self {
+    pub fn new(yolo: bool, keybindings: KeyBindings, theme: Theme, search_limit: usize) -> Self {
         Self {
             query: String::new(),
             cursor_pos: 0,
@@ -167,6 +169,7 @@ impl App {
             theme,
             search_scores: HashMap::new(),
             prev_query_empty: true,
+            search_limit_cap: search_limit,
         }
     }
 
@@ -333,6 +336,7 @@ impl App {
                     .unwrap_or(self.total_count),
                 None => self.total_count,
             }
+            .min(self.search_limit_cap)
             .max(1);
             let scored_results = self.search_engine.search(
                 &self.query,

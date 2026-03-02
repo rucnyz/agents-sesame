@@ -152,6 +152,9 @@ pub fn log_file() -> PathBuf {
     cache_dir().join("parse-errors.log")
 }
 
+/// Default search result limit (max results returned by Tantivy per query).
+pub const DEFAULT_SEARCH_LIMIT: usize = 1000;
+
 /// Application configuration loaded from TOML.
 #[derive(Debug, Deserialize, Default)]
 pub struct AppConfig {
@@ -161,6 +164,8 @@ pub struct AppConfig {
     pub keybindings: HashMap<String, KeyOrKeys>,
     #[serde(default)]
     pub theme: Option<crate::tui::theme::ThemeConfig>,
+    /// Max search results returned per query. Default: 1000.
+    pub search_limit: Option<usize>,
 }
 
 /// Per-agent path configuration. All fields optional.

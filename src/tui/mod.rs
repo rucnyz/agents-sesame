@@ -89,7 +89,10 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
     // Pre-warm jieba dictionary in background so first Ctrl+W doesn't lag
     App::warm_jieba();
 
-    let mut app = App::new(yolo, kb, theme);
+    let search_limit = cfg
+        .search_limit
+        .unwrap_or(crate::config::DEFAULT_SEARCH_LIMIT);
+    let mut app = App::new(yolo, kb, theme, search_limit);
     app.icons = icon_manager;
     if let Some(dir) = directory {
         app.directory_filter = Some(dir.to_string());
