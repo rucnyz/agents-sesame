@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::adapter::AgentAdapter;
 use crate::adapters::{
@@ -35,7 +35,7 @@ pub struct SessionSearch {
     search_cache: HashMap<String, Vec<(String, f64)>>,
     /// Timing data from the last scan (for --stats diagnostics).
     pub last_scan_timings: Option<ScanTimings>,
-    /// Pending changes from deferred commit.
+    /// Pending changes from list_streaming(), committed later via fork.
     pending_new: Vec<Session>,
     pending_deleted: Vec<String>,
 }
@@ -165,43 +165,49 @@ impl SessionSearch {
         self.finalize_sessions()
     }
 
-    /// Get all sessions with deferred Tantivy commit.
-    /// Returns sessions immediately via in-memory overlay (old index + new/deleted).
-    /// Call `commit_pending()` afterwards to persist to Tantivy.
-    pub fn get_all_sessions_deferred(
+    /// Streaming list for CLI: emit cached sessions first, then scan.
+    ///
+    /// Tantivy commit is deferred — call `commit_pending()` afterwards.
+    /// This lets the caller fork so the parent exits early (giving TV/fzf
+    /// an early EOF) while the child commits in the background.
+    pub fn list_streaming(
         &mut self,
         force_refresh: bool,
         agent_hint: Option<&str>,
-    ) -> Vec<Session> {
-        // For rebuild, commit synchronously (index was wiped, must persist)
+        mut emit: impl FnMut(&[Session]),
+    ) {
         if force_refresh {
-            return self.get_all_sessions(true, agent_hint);
+            let sessions = self.get_all_sessions(true, agent_hint);
+            emit(&sessions);
+            return;
+        }
+
+        // Phase 1: emit cached sessions from Tantivy immediately
+        let cached = self.finalize_sessions();
+        if !cached.is_empty() {
+            emit(&cached);
         }
 
         if self.index.is_fresh(5) {
-            return self.finalize_sessions();
+            return;
         }
 
+        // Phase 2: scan for changes, emit new sessions immediately
         let (all_new, all_deleted, adapter_timings) = self.scan_adapters(false, agent_hint);
 
+        if !all_new.is_empty() {
+            emit(&all_new);
+        }
+
+        // Store pending changes for deferred commit
+        self.pending_new = all_new;
+        self.pending_deleted = all_deleted;
         self.last_scan_timings = Some(ScanTimings {
             adapters: adapter_timings,
             index_write: std::time::Duration::ZERO,
-            new_count: all_new.len(),
-            deleted_count: all_deleted.len(),
+            new_count: self.pending_new.len(),
+            deleted_count: self.pending_deleted.len(),
         });
-
-        // No changes → fast path: just read from Tantivy, no overlay or commit needed
-        if all_new.is_empty() && all_deleted.is_empty() {
-            self.index.touch_scan_marker();
-            return self.finalize_sessions();
-        }
-
-        // Has changes → in-memory overlay, stash for deferred commit
-        let sessions = self.finalize_with_overlay(&all_new, &all_deleted);
-        self.pending_new = all_new;
-        self.pending_deleted = all_deleted;
-        sessions
     }
 
     /// Whether there are pending changes to commit.
@@ -209,15 +215,16 @@ impl SessionSearch {
         !self.pending_new.is_empty() || !self.pending_deleted.is_empty()
     }
 
-    /// Commit any pending changes from `get_all_sessions_deferred()` to Tantivy.
+    /// Commit pending changes to Tantivy index (called from forked child).
     pub fn commit_pending(&mut self) {
-        if self.pending_new.is_empty() && self.pending_deleted.is_empty() {
+        if !self.has_pending() {
             return;
         }
-        let new = std::mem::take(&mut self.pending_new);
-        let deleted = std::mem::take(&mut self.pending_deleted);
-        self.index.batch_update(&deleted, &new);
+        self.index
+            .batch_update(&self.pending_deleted, &self.pending_new);
         self.index.touch_scan_marker();
+        self.pending_new.clear();
+        self.pending_deleted.clear();
     }
 
     /// Progressive loading: send cached sessions first, then update after each adapter.
@@ -265,33 +272,6 @@ impl SessionSearch {
     fn finalize_sessions(&mut self) -> Vec<Session> {
         self.search_cache.clear();
         let mut sessions = self.index.get_all_sessions();
-        for s in &sessions {
-            self.sessions_by_id.insert(s.id.clone(), s.clone());
-        }
-        sessions.sort_by(|a, b| {
-            b.mtime
-                .partial_cmp(&a.mtime)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        sessions
-    }
-
-    /// Read from Tantivy index, apply in-memory overlay (new + deleted), populate sessions_by_id.
-    fn finalize_with_overlay(&mut self, new: &[Session], deleted: &[String]) -> Vec<Session> {
-        self.search_cache.clear();
-        let mut sessions = self.index.get_all_sessions();
-
-        // Build lookup sets
-        let deleted_set: HashSet<&str> = deleted.iter().map(|s| s.as_str()).collect();
-        let new_ids: HashSet<&str> = new.iter().map(|s| s.id.as_str()).collect();
-
-        // Remove deleted and sessions that will be replaced
-        sessions
-            .retain(|s| !deleted_set.contains(s.id.as_str()) && !new_ids.contains(s.id.as_str()));
-
-        // Add new/updated sessions
-        sessions.extend(new.iter().cloned());
-
         for s in &sessions {
             self.sessions_by_id.insert(s.id.clone(), s.clone());
         }

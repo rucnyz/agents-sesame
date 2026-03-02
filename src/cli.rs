@@ -501,81 +501,79 @@ fn print_stats(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
+    use std::io::Write;
+
     let start = std::time::Instant::now();
     let mut engine = SessionSearch::new();
+    let has_query = cli.query.as_ref().is_some_and(|q| !q.is_empty());
 
-    // Use deferred commit: get results via in-memory overlay, commit after output.
-    let sessions = engine.get_all_sessions_deferred(cli.rebuild, cli.agent.as_deref());
-
-    // If there's a query, use full-text search
-    let results = if let Some(ref query) = cli.query {
-        if !query.is_empty() {
-            engine
-                .search(
-                    query,
-                    cli.agent.as_deref(),
-                    cli.directory.as_deref(),
-                    sessions.len().max(1),
-                )
-                .into_iter()
-                .map(|(s, _)| s)
-                .collect()
+    if has_query || cli.ids || cli.format != "tsv" {
+        // Non-streaming path: need all sessions for search/table/json
+        let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref());
+        let results = if let Some(ref query) = cli.query {
+            if !query.is_empty() {
+                engine
+                    .search(
+                        query,
+                        cli.agent.as_deref(),
+                        cli.directory.as_deref(),
+                        sessions.len().max(1),
+                    )
+                    .into_iter()
+                    .map(|(s, _)| s)
+                    .collect()
+            } else {
+                apply_basic_filters(sessions, cli)
+            }
         } else {
             apply_basic_filters(sessions, cli)
+        };
+
+        if cli.ids {
+            for s in &results {
+                println!("{}", s.id);
+            }
+        } else {
+            match cli.format.as_str() {
+                "json" => print_sessions_json(&results),
+                _ => print_sessions(&results, start.elapsed()),
+            }
         }
     } else {
-        apply_basic_filters(sessions, cli)
-    };
-
-    if cli.ids {
-        for s in &results {
-            println!("{}", s.id);
-        }
-    } else {
-        match cli.format.as_str() {
-            "tsv" => print_sessions_tsv(&results),
-            "json" => print_sessions_json(&results),
-            _ => print_sessions(&results, start.elapsed()),
-        }
+        // Streaming TSV path: emit data first, then fork to commit Tantivy
+        // in the background. Parent exits early → TV/fzf get early EOF.
+        let agent = cli.agent.clone();
+        let directory = cli.directory.clone();
+        engine.list_streaming(cli.rebuild, cli.agent.as_deref(), |sessions| {
+            let filtered =
+                apply_basic_filters_ref(sessions, agent.as_deref(), directory.as_deref());
+            print_sessions_tsv(&filtered);
+            let _ = std::io::stdout().flush();
+        });
+        fork_commit(engine);
+        return Ok(());
     }
-
-    // Flush stdout, then fork: parent exits immediately (shell exits → TV gets EOF),
-    // child persists pending changes to Tantivy in background.
-    {
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
-    }
-    #[cfg(unix)]
-    fork_commit(engine);
 
     Ok(())
 }
 
-/// Fork a child process to commit pending Tantivy changes.
-/// Parent returns immediately (so the shell exits and TV/fzf get EOF).
-/// Child does the commit and exits.
-#[cfg(unix)]
+/// Fork so parent exits early (EOF for TV/fzf), child commits Tantivy.
 fn fork_commit(mut engine: SessionSearch) {
     if !engine.has_pending() {
         return;
     }
-    // Safety: single-threaded at this point (all output done, no background threads).
-    match unsafe { libc::fork() } {
-        -1 => {
-            // Fork failed — commit synchronously as fallback.
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            // fork failed — commit synchronously
             engine.commit_pending();
-        }
-        0 => {
-            // Child: close stdout to release the pipe, then commit and exit.
-            unsafe {
-                libc::close(1);
-            }
+        } else if pid == 0 {
+            // child: close stdout, commit in background, then exit
+            libc::close(1);
             engine.commit_pending();
             std::process::exit(0);
         }
-        _pid => {
-            // Parent: return immediately (let shell exit → TV gets EOF).
-        }
+        // parent: return immediately (process exits, TV gets EOF)
     }
 }
 
@@ -588,6 +586,24 @@ fn apply_basic_filters(mut sessions: Vec<Session>, cli: &Cli) -> Vec<Session> {
         sessions.retain(|s| s.directory.to_lowercase().contains(&lower));
     }
     sessions
+}
+
+fn apply_basic_filters_ref(
+    sessions: &[Session],
+    agent: Option<&str>,
+    directory: Option<&str>,
+) -> Vec<Session> {
+    let dir_lower = directory.map(|d| d.to_lowercase());
+    sessions
+        .iter()
+        .filter(|s| agent.is_none_or(|a| s.agent == a))
+        .filter(|s| {
+            dir_lower
+                .as_ref()
+                .is_none_or(|d| s.directory.to_lowercase().contains(d.as_str()))
+        })
+        .cloned()
+        .collect()
 }
 
 fn print_sessions(sessions: &[Session], elapsed: std::time::Duration) {
