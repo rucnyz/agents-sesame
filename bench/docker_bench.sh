@@ -26,7 +26,25 @@ command -v $CCSEARCH &>/dev/null && TOOLS+=("ccsearch")
 echo "Available tools: ${TOOLS[*]}"
 echo ""
 
-# --- Build indexes first ---
+# --- 1. Cold rebuild (FIRST, before anything warms the page cache) ---
+echo "=== 1. Cold rebuild (single run, cold page cache) ==="
+# Run cold rebuild BEFORE any warm-up. This is the only point in the container's
+# lifetime where the OS page cache is guaranteed empty — JSONL files haven't been
+# read yet. Using single `time` runs (not hyperfine) because multiple iterations
+# would warm the page cache, making runs 2+ artificially fast.
+echo "--- ase cold rebuild ---"
+rm -rf ~/.cache/agents-sesame/tantivy_index_rs
+time $ASE --rebuild --list --agent claude >/dev/null 2>&1
+echo ""
+
+if command -v $CCRIDER &>/dev/null; then
+    echo "--- ccrider cold rebuild ---"
+    rm -f ~/.config/ccrider/sessions.db
+    time $CCRIDER sync >/dev/null 2>&1
+    echo ""
+fi
+
+# --- Build/warm indexes for remaining benchmarks ---
 echo "=== Building indexes ==="
 echo -n "ase --rebuild: "
 $ASE --rebuild --list >/dev/null 2>&1 && echo "ok" || echo "fail"
@@ -52,8 +70,8 @@ if command -v $CC_SESSIONS &>/dev/null; then
 fi
 echo ""
 
-# --- List benchmark ---
-echo "=== 1. List sessions (warm, Claude only) ==="
+# --- 2. List benchmark (warm cache) ---
+echo "=== 2. List sessions (warm, Claude only) ==="
 ARGS=(-n "ase" "$ASE --list --agent claude 2>/dev/null")
 command -v $CC_SESSIONS &>/dev/null && ARGS+=(-n "cc-sessions" "$CC_SESSIONS --list 2>/dev/null")
 command -v $CCRIDER &>/dev/null && ARGS+=(-n "ccrider" "$CCRIDER list 2>/dev/null")
@@ -61,20 +79,12 @@ command -v $CCSEARCH &>/dev/null && ARGS+=(-n "ccsearch" "$CCSEARCH list 2>/dev/
 hyperfine --warmup 2 --min-runs 10 "${ARGS[@]}"
 
 echo ""
-echo "=== 2. Search 'niri' (Claude only) ==="
+echo "=== 3. Search 'niri' (Claude only) ==="
 ARGS=(-n "ase" "$ASE --list --agent claude 'niri' 2>/dev/null")
 command -v $CASS &>/dev/null && ARGS+=(-n "cass" "$CASS search 'niri' --agent claude-code --robot 2>/dev/null")
 command -v $CCRIDER &>/dev/null && ARGS+=(-n "ccrider" "$CCRIDER search 'niri' 2>/dev/null")
 command -v $CCSEARCH &>/dev/null && ARGS+=(-n "ccsearch" "$CCSEARCH search 'niri' --no-tui 2>/dev/null")
 hyperfine --warmup 2 --min-runs 10 "${ARGS[@]}"
-
-echo ""
-echo "=== 3. Cold rebuild ==="
-# Only test ase and ccrider (others are too slow or don't have rebuild)
-ARGS=()
-ARGS+=(-n "ase" --prepare "rm -rf ~/.cache/agents-sesame/tantivy_index_rs" "$ASE --rebuild --list --agent claude 2>/dev/null")
-command -v $CCRIDER &>/dev/null && ARGS+=(-n "ccrider" --prepare "rm -f ~/.local/share/ccrider/ccrider.db" "$CCRIDER sync 2>/dev/null && $CCRIDER search 'test' 2>/dev/null")
-hyperfine --warmup 0 --min-runs 3 "${ARGS[@]}"
 
 echo ""
 echo "=== 4. Binary sizes ==="

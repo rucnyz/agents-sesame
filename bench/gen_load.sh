@@ -4,6 +4,10 @@
 #   source_dir: real ~/.claude/projects directory
 #   target_dir: output directory (will be created)
 #   multiplier: how many copies (e.g. 10 = 10x sessions)
+#
+# Each copy gets a unique file name AND unique sessionId inside the JSONL,
+# so tools that deduplicate by internal sessionId (e.g. ccrider) also see
+# the full multiplied session count.
 set -euo pipefail
 
 SRC="${1:?Usage: gen_load.sh <source_dir> <target_dir> <multiplier>}"
@@ -26,9 +30,10 @@ echo "Target: $DST (${MUL}x = $((ORIG_COUNT * MUL)) files)"
 echo "Copying original data..."
 cp -r "$SRC"/* "$DST/"
 
-# Generate N-1 more copies with modified UUIDs
+# Generate N-1 more copies with modified UUIDs (both filename and content)
 for i in $(seq 1 $((MUL - 1))); do
     echo "Generating copy $i/$((MUL - 1))..."
+    PREFIX=$(printf "%08d" "$i")
     for project_dir in "$SRC"/*/; do
         project_name=$(basename "$project_dir")
         target_project="$DST/$project_name"
@@ -37,10 +42,11 @@ for i in $(seq 1 $((MUL - 1))); do
         for jsonl in "$project_dir"*.jsonl; do
             [ -f "$jsonl" ] || continue
             base=$(basename "$jsonl" .jsonl)
-            # Generate a deterministic new UUID by appending copy number
-            # Replace first 8 chars of UUID with zero-padded copy index
-            new_id=$(printf "%08d" $i)-${base:9}
-            cp "$jsonl" "$target_project/${new_id}.jsonl"
+            # New filename: replace first 8 chars of UUID
+            new_id="${PREFIX}-${base:9}"
+            # Replace sessionId in JSONL content: "sessionId":"<old>" → "sessionId":"<new>"
+            sed "s/\"sessionId\":\"${base}\"/\"sessionId\":\"${new_id}\"/g" \
+                "$jsonl" > "$target_project/${new_id}.jsonl"
         done
     done
 done

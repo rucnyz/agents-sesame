@@ -99,6 +99,7 @@ impl SessionSearch {
         &mut self,
         force_refresh: bool,
         agent_hint: Option<&str>,
+        verbose: bool,
     ) -> (Vec<Session>, Vec<String>, AdapterTimings) {
         let known = if force_refresh {
             HashMap::new()
@@ -121,18 +122,44 @@ impl SessionSearch {
             None => (0..self.adapters.len()).collect(),
         };
 
+        let pb = if verbose {
+            use indicatif::{ProgressBar, ProgressStyle};
+            let pb = ProgressBar::new(adapters_to_scan.len() as u64);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{msg} [{bar:30}] {pos}/{len} adapters")
+                    .unwrap()
+                    .progress_chars("=> "),
+            );
+            pb.set_message("Scanning");
+            Some(pb)
+        } else {
+            None
+        };
+
         let mut all_new: Vec<Session> = Vec::new();
         let mut all_deleted: Vec<String> = Vec::new();
         let mut adapter_timings: AdapterTimings = Vec::new();
         for i in adapters_to_scan {
+            let name = self.adapters[i].name().to_string();
+            if let Some(ref pb) = pb {
+                pb.set_message(format!("Scanning {name}"));
+            }
             let t = std::time::Instant::now();
             let (new_sessions, deleted) =
                 self.adapters[i].find_sessions_incremental(&known, &None, &None);
             let elapsed = t.elapsed();
             let count = new_sessions.len();
-            adapter_timings.push((self.adapters[i].name().to_string(), elapsed, count));
+            adapter_timings.push((name, elapsed, count));
             all_new.extend(new_sessions);
             all_deleted.extend(deleted);
+            if let Some(ref pb) = pb {
+                pb.inc(1);
+            }
+        }
+
+        if let Some(ref pb) = pb {
+            pb.finish_with_message(format!("Scanned {} sessions", all_new.len()));
         }
 
         (all_new, all_deleted, adapter_timings)
@@ -144,12 +171,14 @@ impl SessionSearch {
         &mut self,
         force_refresh: bool,
         agent_hint: Option<&str>,
+        verbose: bool,
     ) -> Vec<Session> {
         if !force_refresh && self.index.is_fresh(5) {
             return self.finalize_sessions();
         }
 
-        let (all_new, all_deleted, adapter_timings) = self.scan_adapters(force_refresh, agent_hint);
+        let (all_new, all_deleted, adapter_timings) =
+            self.scan_adapters(force_refresh, agent_hint, verbose);
 
         let index_start = std::time::Instant::now();
         self.index.batch_update(&all_deleted, &all_new);
@@ -177,7 +206,7 @@ impl SessionSearch {
         mut emit: impl FnMut(&[Session]),
     ) {
         if force_refresh {
-            let sessions = self.get_all_sessions(true, agent_hint);
+            let sessions = self.get_all_sessions(true, agent_hint, false);
             emit(&sessions);
             return;
         }
@@ -193,7 +222,7 @@ impl SessionSearch {
         }
 
         // Phase 2: scan for changes, emit new sessions immediately
-        let (all_new, all_deleted, adapter_timings) = self.scan_adapters(false, agent_hint);
+        let (all_new, all_deleted, adapter_timings) = self.scan_adapters(false, agent_hint, false);
 
         if !all_new.is_empty() {
             emit(&all_new);

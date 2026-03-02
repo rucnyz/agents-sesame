@@ -421,7 +421,7 @@ fn install_tv_channel() -> anyhow::Result<()> {
 
 fn preview_session(id: &str) -> anyhow::Result<()> {
     let mut engine = SessionSearch::new();
-    engine.get_all_sessions(false, None);
+    engine.get_all_sessions(false, None, false);
     engine.ensure_session_content(id);
     let session = engine
         .get_session_by_id(id)
@@ -432,7 +432,7 @@ fn preview_session(id: &str) -> anyhow::Result<()> {
 
 fn resume_session_by_id(id: &str, yolo: bool) -> anyhow::Result<()> {
     let mut engine = SessionSearch::new();
-    engine.get_all_sessions(false, None);
+    engine.get_all_sessions(false, None, false);
     let session = engine
         .get_session_by_id(id)
         .ok_or_else(|| anyhow::anyhow!("Session not found: {id}"))?
@@ -461,7 +461,7 @@ fn print_stats(cli: &Cli) -> anyhow::Result<()> {
     let init_elapsed = init_start.elapsed();
 
     let scan_start = std::time::Instant::now();
-    let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref());
+    let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref(), cli.rebuild);
     let scan_elapsed = scan_start.elapsed();
 
     let total_elapsed = total_start.elapsed();
@@ -514,7 +514,7 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
 
     if has_query || cli.ids || cli.format != "tsv" {
         // Non-streaming path: need all sessions for search/table/json
-        let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref());
+        let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref(), cli.rebuild);
         let results = if let Some(ref query) = cli.query {
             if !query.is_empty() {
                 engine
