@@ -48,8 +48,10 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
         use crate::search::{LoadingMsg, SessionSearch};
         use std::io::Write;
 
-        // Show immediately, before SessionSearch::new() runs
-        eprint!("\rBuilding index...");
+        // Line 1: static message (stays until done)
+        eprintln!("Building session index for the first time, this may take a moment...");
+        // Line 2: progress (updated in-place with \r)
+        eprint!("  Initializing...");
         let _ = std::io::stderr().flush();
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -64,7 +66,11 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
         loop {
             match rx.recv() {
                 Ok(LoadingMsg::Scanning(name, idx, total)) => {
-                    eprint!("\rBuilding index: {name} [{}/{}]\x1b[K", idx + 1, total);
+                    eprint!("\r  {name} [{}/{}]\x1b[K", idx + 1, total);
+                    let _ = std::io::stderr().flush();
+                }
+                Ok(LoadingMsg::Progress(name, count)) => {
+                    eprint!("\r  {name} ({count} sessions)\x1b[K");
                     let _ = std::io::stderr().flush();
                 }
                 Ok(LoadingMsg::Sessions(sessions)) => {
@@ -77,8 +83,8 @@ pub fn run_tui(yolo: bool, directory: Option<&str>) -> anyhow::Result<()> {
                 Err(_) => break,
             }
         }
-        // Clear the progress line
-        eprint!("\r\x1b[K");
+        // Clear the progress line (line 2), then move up and clear line 1
+        eprint!("\r\x1b[K\x1b[A\r\x1b[K");
         let _ = std::io::stderr().flush();
         Some((all_sessions, done_engine, rx))
     } else {

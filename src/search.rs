@@ -12,8 +12,10 @@ use crate::session::Session;
 
 pub enum LoadingMsg {
     Sessions(Vec<Session>),
-    /// Currently scanning this adapter (name, index, total).
+    /// Currently scanning this adapter (name, index, total_adapters).
     Scanning(String, usize, usize),
+    /// Per-session progress within an adapter (adapter_name, sessions_found).
+    Progress(String, usize),
     Done(Box<SessionSearch>),
 }
 
@@ -135,9 +137,30 @@ impl SessionSearch {
                 eprint!("\rScanning {name} [{}/{}]\x1b[K", step + 1, total_adapters);
                 let _ = std::io::stderr().flush();
             }
+            let on_session: crate::adapter::SessionCallback = if verbose {
+                use std::io::Write;
+                let name_p = name.clone();
+                let step_p = step;
+                let total_p = total_adapters;
+                let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let count_p = count.clone();
+                Some(Box::new(move |_s: &Session| {
+                    let c = count_p.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if c == 1 || c.is_multiple_of(50) {
+                        eprint!(
+                            "\rScanning {name_p} ({c} sessions) [{}/{}]\x1b[K",
+                            step_p + 1,
+                            total_p
+                        );
+                        let _ = std::io::stderr().flush();
+                    }
+                }))
+            } else {
+                None
+            };
             let t = std::time::Instant::now();
             let (new_sessions, deleted) =
-                self.adapters[i].find_sessions_incremental(&known, &None, &None);
+                self.adapters[i].find_sessions_incremental(&known, &None, &on_session);
             let elapsed = t.elapsed();
             let count = new_sessions.len();
             adapter_timings.push((name, elapsed, count));
@@ -270,13 +293,29 @@ impl SessionSearch {
         // Process each adapter and send updates
         let adapter_count = self.adapters.len();
         for i in 0..adapter_count {
-            let _ = tx.send(LoadingMsg::Scanning(
-                self.adapters[i].name().to_string(),
-                i,
-                adapter_count,
-            ));
+            let name = self.adapters[i].name().to_string();
+            let _ = tx.send(LoadingMsg::Scanning(name.clone(), i, adapter_count));
+
+            // Per-session progress callback (throttled: every 50 sessions)
+            let tx_p = tx.clone();
+            let name_p = name.clone();
+            let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count_p = count.clone();
+            let on_session: crate::adapter::SessionCallback =
+                Some(Box::new(move |_s: &Session| {
+                    let c = count_p.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if c == 1 || c.is_multiple_of(50) {
+                        let _ = tx_p.send(LoadingMsg::Progress(name_p.clone(), c));
+                    }
+                }));
+
             let (new_sessions, deleted) =
-                self.adapters[i].find_sessions_incremental(&known, &None, &None);
+                self.adapters[i].find_sessions_incremental(&known, &None, &on_session);
+            // Send final count if not already sent
+            let final_count = count.load(std::sync::atomic::Ordering::Relaxed);
+            if final_count > 0 && !final_count.is_multiple_of(50) {
+                let _ = tx.send(LoadingMsg::Progress(name, final_count));
+            }
             let has_changes = !new_sessions.is_empty() || !deleted.is_empty();
             if !deleted.is_empty() {
                 self.index.delete_sessions(&deleted);
