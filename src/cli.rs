@@ -94,6 +94,10 @@ pub fn run() -> anyhow::Result<()> {
         return resume_session_by_id(id, cli.yolo);
     }
 
+    if cli.stats {
+        return print_stats(&cli);
+    }
+
     if cli.ids || cli.no_tui || cli.list_only {
         list_sessions(&cli)?;
     } else {
@@ -448,11 +452,60 @@ fn resume_session_by_id(id: &str, yolo: bool) -> anyhow::Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+fn print_stats(cli: &Cli) -> anyhow::Result<()> {
+    let total_start = std::time::Instant::now();
+
+    let init_start = std::time::Instant::now();
+    let mut engine = SessionSearch::new();
+    let init_elapsed = init_start.elapsed();
+
+    let scan_start = std::time::Instant::now();
+    let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref());
+    let scan_elapsed = scan_start.elapsed();
+
+    let total_elapsed = total_start.elapsed();
+
+    println!("=== Scan Diagnostics ===\n");
+    println!(
+        "Total: {:.1}ms  (init: {:.1}ms, scan+index: {:.1}ms)",
+        total_elapsed.as_secs_f64() * 1000.0,
+        init_elapsed.as_secs_f64() * 1000.0,
+        scan_elapsed.as_secs_f64() * 1000.0,
+    );
+    println!("Sessions: {} total\n", sessions.len());
+
+    if let Some(ref timings) = engine.last_scan_timings {
+        println!("{:<18} {:>8}  {:>6}", "Adapter", "Time", "New");
+        println!("{}", "-".repeat(36));
+        let mut sorted = timings.adapters.clone();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (name, duration, count) in &sorted {
+            let ms = duration.as_secs_f64() * 1000.0;
+            if *count > 0 {
+                println!("{:<18} {:>7.1}ms  {:>5}", name, ms, count);
+            } else {
+                println!("{:<18} {:>7.1}ms      -", name, ms);
+            }
+        }
+        println!(
+            "\nIndex write: {:.1}ms ({} new, {} deleted)",
+            timings.index_write.as_secs_f64() * 1000.0,
+            timings.new_count,
+            timings.deleted_count,
+        );
+    } else {
+        println!("(skipped scan — index fresh)");
+    }
+
+    Ok(())
+}
+
 fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     let mut engine = SessionSearch::new();
 
-    let sessions = engine.get_all_sessions(cli.rebuild, cli.agent.as_deref());
+    // Use deferred commit: get results via in-memory overlay, commit after output.
+    let sessions = engine.get_all_sessions_deferred(cli.rebuild, cli.agent.as_deref());
 
     // If there's a query, use full-text search
     let results = if let Some(ref query) = cli.query {
@@ -485,7 +538,45 @@ fn list_sessions(cli: &Cli) -> anyhow::Result<()> {
             _ => print_sessions(&results, start.elapsed()),
         }
     }
+
+    // Flush stdout, then fork: parent exits immediately (shell exits → TV gets EOF),
+    // child persists pending changes to Tantivy in background.
+    {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+    }
+    #[cfg(unix)]
+    fork_commit(engine);
+
     Ok(())
+}
+
+/// Fork a child process to commit pending Tantivy changes.
+/// Parent returns immediately (so the shell exits and TV/fzf get EOF).
+/// Child does the commit and exits.
+#[cfg(unix)]
+fn fork_commit(mut engine: SessionSearch) {
+    if !engine.has_pending() {
+        return;
+    }
+    // Safety: single-threaded at this point (all output done, no background threads).
+    match unsafe { libc::fork() } {
+        -1 => {
+            // Fork failed — commit synchronously as fallback.
+            engine.commit_pending();
+        }
+        0 => {
+            // Child: close stdout to release the pipe, then commit and exit.
+            unsafe {
+                libc::close(1);
+            }
+            engine.commit_pending();
+            std::process::exit(0);
+        }
+        _pid => {
+            // Parent: return immediately (let shell exit → TV gets EOF).
+        }
+    }
 }
 
 fn apply_basic_filters(mut sessions: Vec<Session>, cli: &Cli) -> Vec<Session> {
@@ -547,9 +638,11 @@ fn print_sessions_tsv(sessions: &[Session]) {
     for s in sessions {
         let dir = s.directory.replace(&*home_str, "~");
         let date = format_time_ago(s.timestamp, chrono::Local::now().naive_local());
+        // Replace newlines in title to keep one TSV record per line
+        let title = s.title.replace('\n', " ").replace('\r', "");
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}",
-            s.id, s.agent, s.title, dir, s.message_count, date
+            s.id, s.agent, title, dir, s.message_count, date
         );
     }
 }

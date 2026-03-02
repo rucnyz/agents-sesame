@@ -28,6 +28,7 @@ dependencies = [
  "dirs",
  "image",
  "jieba-rs",
+ "libc",
  "ratatui",
  "ratatui-image",
  "regex",

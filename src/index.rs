@@ -309,6 +309,27 @@ impl TantivyIndex {
         self.reload_reader();
     }
 
+    /// Batch update: delete IDs + upsert sessions in a single writer + single commit.
+    pub fn batch_update(&self, delete_ids: &[String], upsert: &[Session]) {
+        if delete_ids.is_empty() && upsert.is_empty() {
+            return;
+        }
+        let Some(mut writer) = self.acquire_writer() else {
+            return;
+        };
+        for id in delete_ids {
+            let term = Term::from_field_text(self.f_id, id);
+            writer.delete_term(term);
+        }
+        for session in upsert {
+            let term = Term::from_field_text(self.f_id, &session.id);
+            writer.delete_term(term);
+            writer.add_document(self.session_to_doc(session)).ok();
+        }
+        let _ = writer.commit();
+        self.reload_reader();
+    }
+
     /// Get session count, optionally filtered by agent.
     #[allow(dead_code)]
     pub fn get_session_count(&self, agent_filter: Option<&str>) -> usize {

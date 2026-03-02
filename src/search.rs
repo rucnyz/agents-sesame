@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::adapter::AgentAdapter;
 use crate::adapters::{
@@ -17,12 +17,27 @@ pub enum LoadingMsg {
 
 const SEARCH_CACHE_CAPACITY: usize = 64;
 
+/// Per-adapter timing: (name, duration, new_count).
+pub type AdapterTimings = Vec<(String, std::time::Duration, usize)>;
+
+pub struct ScanTimings {
+    pub adapters: AdapterTimings,
+    pub index_write: std::time::Duration,
+    pub new_count: usize,
+    pub deleted_count: usize,
+}
+
 pub struct SessionSearch {
     adapters: Vec<Box<dyn AgentAdapter>>,
     sessions_by_id: HashMap<String, Session>,
     index: TantivyIndex,
     /// Cache: query key → Tantivy results (id, score). Cleared on index update.
     search_cache: HashMap<String, Vec<(String, f64)>>,
+    /// Timing data from the last scan (for --stats diagnostics).
+    pub last_scan_timings: Option<ScanTimings>,
+    /// Pending changes from deferred commit.
+    pending_new: Vec<Session>,
+    pending_deleted: Vec<String>,
 }
 
 impl Default for SessionSearch {
@@ -73,23 +88,18 @@ impl SessionSearch {
             sessions_by_id: HashMap::new(),
             index: TantivyIndex::new(),
             search_cache: HashMap::new(),
+            last_scan_timings: None,
+            pending_new: Vec::new(),
+            pending_deleted: Vec::new(),
         }
     }
 
-    /// Get all sessions, using incremental updates.
-    /// Skips adapter scanning if the index was scanned within the last 5 seconds
-    /// (e.g. rapid CLI calls from fzf/television preview).
-    /// If `agent_hint` is provided, only scan that adapter (others use cached data).
-    pub fn get_all_sessions(
+    /// Scan adapters and collect changes. Returns (all_new, all_deleted, adapter_timings).
+    fn scan_adapters(
         &mut self,
         force_refresh: bool,
         agent_hint: Option<&str>,
-    ) -> Vec<Session> {
-        // Skip adapter scan if index is fresh (< 5s old) and not forcing
-        if !force_refresh && self.index.is_fresh(5) {
-            return self.finalize_sessions();
-        }
-
+    ) -> (Vec<Session>, Vec<String>, AdapterTimings) {
         let known = if force_refresh {
             HashMap::new()
         } else {
@@ -100,7 +110,6 @@ impl SessionSearch {
             self.index.clear();
         }
 
-        // Select adapters to scan: all, or just the one matching agent_hint
         let adapters_to_scan: Vec<usize> = match agent_hint {
             Some(agent) => self
                 .adapters
@@ -114,23 +123,101 @@ impl SessionSearch {
 
         let mut all_new: Vec<Session> = Vec::new();
         let mut all_deleted: Vec<String> = Vec::new();
+        let mut adapter_timings: AdapterTimings = Vec::new();
         for i in adapters_to_scan {
+            let t = std::time::Instant::now();
             let (new_sessions, deleted) =
                 self.adapters[i].find_sessions_incremental(&known, &None, &None);
+            let elapsed = t.elapsed();
+            let count = new_sessions.len();
+            adapter_timings.push((self.adapters[i].name().to_string(), elapsed, count));
             all_new.extend(new_sessions);
             all_deleted.extend(deleted);
         }
 
-        // Apply changes
-        if !all_deleted.is_empty() {
-            self.index.delete_sessions(&all_deleted);
-        }
-        if !all_new.is_empty() {
-            self.index.update_sessions(&all_new);
+        (all_new, all_deleted, adapter_timings)
+    }
+
+    /// Get all sessions with immediate Tantivy commit.
+    /// Used by TUI and --stats.
+    pub fn get_all_sessions(
+        &mut self,
+        force_refresh: bool,
+        agent_hint: Option<&str>,
+    ) -> Vec<Session> {
+        if !force_refresh && self.index.is_fresh(5) {
+            return self.finalize_sessions();
         }
 
+        let (all_new, all_deleted, adapter_timings) = self.scan_adapters(force_refresh, agent_hint);
+
+        let index_start = std::time::Instant::now();
+        self.index.batch_update(&all_deleted, &all_new);
+        let index_elapsed = index_start.elapsed();
+
         self.index.touch_scan_marker();
+        self.last_scan_timings = Some(ScanTimings {
+            adapters: adapter_timings,
+            index_write: index_elapsed,
+            new_count: all_new.len(),
+            deleted_count: all_deleted.len(),
+        });
         self.finalize_sessions()
+    }
+
+    /// Get all sessions with deferred Tantivy commit.
+    /// Returns sessions immediately via in-memory overlay (old index + new/deleted).
+    /// Call `commit_pending()` afterwards to persist to Tantivy.
+    pub fn get_all_sessions_deferred(
+        &mut self,
+        force_refresh: bool,
+        agent_hint: Option<&str>,
+    ) -> Vec<Session> {
+        // For rebuild, commit synchronously (index was wiped, must persist)
+        if force_refresh {
+            return self.get_all_sessions(true, agent_hint);
+        }
+
+        if self.index.is_fresh(5) {
+            return self.finalize_sessions();
+        }
+
+        let (all_new, all_deleted, adapter_timings) = self.scan_adapters(false, agent_hint);
+
+        self.last_scan_timings = Some(ScanTimings {
+            adapters: adapter_timings,
+            index_write: std::time::Duration::ZERO,
+            new_count: all_new.len(),
+            deleted_count: all_deleted.len(),
+        });
+
+        // No changes → fast path: just read from Tantivy, no overlay or commit needed
+        if all_new.is_empty() && all_deleted.is_empty() {
+            self.index.touch_scan_marker();
+            return self.finalize_sessions();
+        }
+
+        // Has changes → in-memory overlay, stash for deferred commit
+        let sessions = self.finalize_with_overlay(&all_new, &all_deleted);
+        self.pending_new = all_new;
+        self.pending_deleted = all_deleted;
+        sessions
+    }
+
+    /// Whether there are pending changes to commit.
+    pub fn has_pending(&self) -> bool {
+        !self.pending_new.is_empty() || !self.pending_deleted.is_empty()
+    }
+
+    /// Commit any pending changes from `get_all_sessions_deferred()` to Tantivy.
+    pub fn commit_pending(&mut self) {
+        if self.pending_new.is_empty() && self.pending_deleted.is_empty() {
+            return;
+        }
+        let new = std::mem::take(&mut self.pending_new);
+        let deleted = std::mem::take(&mut self.pending_deleted);
+        self.index.batch_update(&deleted, &new);
+        self.index.touch_scan_marker();
     }
 
     /// Progressive loading: send cached sessions first, then update after each adapter.
@@ -174,9 +261,37 @@ impl SessionSearch {
         }
     }
 
+    /// Read from Tantivy index and populate sessions_by_id.
     fn finalize_sessions(&mut self) -> Vec<Session> {
         self.search_cache.clear();
         let mut sessions = self.index.get_all_sessions();
+        for s in &sessions {
+            self.sessions_by_id.insert(s.id.clone(), s.clone());
+        }
+        sessions.sort_by(|a, b| {
+            b.mtime
+                .partial_cmp(&a.mtime)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        sessions
+    }
+
+    /// Read from Tantivy index, apply in-memory overlay (new + deleted), populate sessions_by_id.
+    fn finalize_with_overlay(&mut self, new: &[Session], deleted: &[String]) -> Vec<Session> {
+        self.search_cache.clear();
+        let mut sessions = self.index.get_all_sessions();
+
+        // Build lookup sets
+        let deleted_set: HashSet<&str> = deleted.iter().map(|s| s.as_str()).collect();
+        let new_ids: HashSet<&str> = new.iter().map(|s| s.id.as_str()).collect();
+
+        // Remove deleted and sessions that will be replaced
+        sessions
+            .retain(|s| !deleted_set.contains(s.id.as_str()) && !new_ids.contains(s.id.as_str()));
+
+        // Add new/updated sessions
+        sessions.extend(new.iter().cloned());
+
         for s in &sessions {
             self.sessions_by_id.insert(s.id.clone(), s.clone());
         }
@@ -194,7 +309,6 @@ impl SessionSearch {
         agent_filter: Option<&str>,
         directory_filter: Option<&str>,
     ) -> String {
-        // Simple concatenation with separator that won't appear in values
         format!(
             "{}\0{}\0{}",
             query,
