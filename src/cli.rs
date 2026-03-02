@@ -247,7 +247,7 @@ bind \eg __ase_widget
         "bash" => code.push_str(
             r#"
 # ase value completions
-_fr_rs_complete() {
+_ase_complete() {
     local cur prev
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
@@ -258,7 +258,7 @@ _fr_rs_complete() {
         --preview|--resume) COMPREPLY=($(compgen -W "$(ase --ids --list 2>/dev/null)" -- "$cur")) ;;
     esac
 }
-complete -F _fr_rs_complete ase
+complete -F _ase_complete ase
 
 # ase keybinding (Alt+G)
 __ase_widget() {
@@ -270,7 +270,7 @@ bind -x '"\eg":"__ase_widget"'
         "zsh" => code.push_str(
             r#"
 # ase value completions
-_fr_rs() {
+_ase() {
     local -a agents=(claude codex copilot copilot-vscode crush gemini kimi opencode qwen vibe)
     local -a formats=(table tsv json)
     local -a shells=(fish bash zsh)
@@ -282,7 +282,7 @@ _fr_rs() {
         *) _arguments '1:command:(init update uninstall)' '--agent[Filter by agent]:agent:($agents)' '--list[List sessions]' '--format[Output format]:format:($formats)' '--preview[Preview session]:id:' '--resume[Resume session]:id:' '--stats[Stats]' '--rebuild[Rebuild index]' '--yolo[Auto-approve]' ;;
     esac
 }
-compdef _fr_rs ase
+compdef _ase ase
 
 # ase keybinding (Alt+G)
 __ase_widget() {
