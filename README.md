@@ -57,6 +57,9 @@ ase --list --format=json     # JSON lines (one object per line)
 ase --preview <session-id>   # Print session content to stdout
 ase --resume <session-id>    # Resume session directly by ID
 
+# Session management
+ase relocate <id> <dir>      # Move a Claude session to a different directory
+
 # Management
 ase init                     # Set up shell integration (Alt+G + completions)
 ase update                   # Self-update to latest release
@@ -76,6 +79,7 @@ ase uninstall                # Remove binary, config, cache, and shell integrati
 | `` Ctrl+` `` | Toggle preview |
 | `Ctrl+P` | Toggle preview layout |
 | `c` | Copy session content |
+| `Ctrl+O` | Relocate session to a different directory (Claude only) |
 | `Ctrl+E` | Toggle mouse capture |
 | `Esc` | Quit |
 

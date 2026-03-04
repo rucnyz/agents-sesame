@@ -113,6 +113,12 @@ pub struct App {
     pub keybindings: KeyBindings,
     /// Resolved theme colors.
     pub theme: Theme,
+    /// Whether relocate mode is active (typing target directory).
+    pub relocate_mode: bool,
+    /// Target directory path being typed in relocate mode.
+    pub relocate_input: String,
+    /// Cursor position within relocate_input.
+    pub relocate_cursor: usize,
     /// BM25 relevance scores from the last search (id → score).
     search_scores: HashMap<String, f64>,
     /// Whether query was empty on last apply_filter (for detecting transitions).
@@ -167,6 +173,9 @@ impl App {
             loading_rx: None,
             keybindings,
             theme,
+            relocate_mode: false,
+            relocate_input: String::new(),
+            relocate_cursor: 0,
             search_scores: HashMap::new(),
             prev_query_empty: true,
             search_limit_cap: search_limit,
@@ -496,6 +505,12 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        // Relocate mode: intercept all keys for the relocate input
+        if self.relocate_mode {
+            self.handle_relocate_key(key);
+            return;
+        }
+
         let preview_focused = self.focused_pane == FocusedPane::Preview;
         let actions: Vec<Action> = self.keybindings.lookup(&key).to_vec();
 
@@ -590,6 +605,23 @@ impl App {
                 }
                 Action::RefreshSessions => {
                     self.start_loading();
+                    handled = true;
+                }
+                Action::RelocateSession => {
+                    if let Some(session) = self.selected_session() {
+                        if session.agent != "claude" {
+                            self.status_msg =
+                                Some("Relocate only supports Claude sessions".to_string());
+                        } else {
+                            // Pre-fill with current working directory
+                            let cwd = std::env::current_dir()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            self.relocate_input = cwd;
+                            self.relocate_cursor = self.relocate_input.len();
+                            self.relocate_mode = true;
+                        }
+                    }
                     handled = true;
                 }
 
@@ -766,6 +798,196 @@ impl App {
             self.cursor_pos += c.len_utf8();
             self.search_dirty = true;
         }
+    }
+
+    fn handle_relocate_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.relocate_mode = false;
+            }
+            KeyCode::Enter => {
+                self.relocate_mode = false;
+                let input = std::mem::take(&mut self.relocate_input);
+                if input.is_empty() {
+                    return;
+                }
+                if let Some(session) = self.selected_session().cloned() {
+                    match crate::cli::do_relocate(&session, &input, &self.search_engine) {
+                        Ok(new_dir) => {
+                            let home = dirs::home_dir().unwrap_or_default();
+                            let home_str = home.to_string_lossy();
+                            let short = new_dir.replace(&*home_str, "~");
+                            self.status_msg = Some(format!("Relocated to {short}"));
+                            // Update session directory in memory
+                            let id = session.id.clone();
+                            if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
+                                s.directory = new_dir.clone();
+                            }
+                            if let Some(s) = self.filtered.iter_mut().find(|s| s.id == id) {
+                                s.directory = new_dir;
+                            }
+                        }
+                        Err(e) => {
+                            self.status_msg = Some(format!("Relocate failed: {e}"));
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('w') | KeyCode::Backspace
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // Delete path segment backward: skip trailing '/' before searching
+                if self.relocate_cursor > 0 {
+                    let search_end = if self.relocate_input.as_bytes().get(self.relocate_cursor - 1) == Some(&b'/') {
+                        self.relocate_cursor - 1
+                    } else {
+                        self.relocate_cursor
+                    };
+                    let boundary = self.relocate_input[..search_end]
+                        .rfind('/')
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                    self.relocate_input.drain(boundary..self.relocate_cursor);
+                    self.relocate_cursor = boundary;
+                }
+            }
+            KeyCode::Backspace => {
+                if self.relocate_cursor > 0 {
+                    let prev = self.relocate_input[..self.relocate_cursor]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.relocate_input.drain(prev..self.relocate_cursor);
+                    self.relocate_cursor = prev;
+                }
+            }
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Word left (jump to previous /)
+                if self.relocate_cursor > 0 {
+                    self.relocate_cursor = self.relocate_input[..self.relocate_cursor - 1]
+                        .rfind('/')
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                }
+            }
+            KeyCode::Left => {
+                if self.relocate_cursor > 0 {
+                    self.relocate_cursor = self.relocate_input[..self.relocate_cursor]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                }
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Word right (jump to next /)
+                if self.relocate_cursor < self.relocate_input.len() {
+                    self.relocate_cursor = self.relocate_input[self.relocate_cursor + 1..]
+                        .find('/')
+                        .map(|i| self.relocate_cursor + 1 + i)
+                        .unwrap_or(self.relocate_input.len());
+                }
+            }
+            KeyCode::Right => {
+                if self.relocate_cursor < self.relocate_input.len() {
+                    self.relocate_cursor = self.relocate_input[self.relocate_cursor..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| self.relocate_cursor + i)
+                        .unwrap_or(self.relocate_input.len());
+                }
+            }
+            KeyCode::Home => {
+                self.relocate_cursor = 0;
+            }
+            KeyCode::End => {
+                self.relocate_cursor = self.relocate_input.len();
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.relocate_input.clear();
+                self.relocate_cursor = 0;
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.complete_relocate_path();
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.relocate_input.insert(self.relocate_cursor, c);
+                self.relocate_cursor += c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    /// Tab-complete the relocate path input (like bash directory completion).
+    fn complete_relocate_path(&mut self) {
+        let input = &self.relocate_input;
+        // Expand ~ to home directory
+        let expanded = if let Some(rest) = input.strip_prefix('~') {
+            let home = dirs::home_dir().unwrap_or_default();
+            home.to_string_lossy().to_string() + rest
+        } else {
+            input.clone()
+        };
+
+        let path = std::path::Path::new(&expanded);
+        let (parent, prefix) = if expanded.ends_with('/') {
+            (std::path::Path::new(&expanded).to_path_buf(), "")
+        } else {
+            let p = path.parent().unwrap_or(std::path::Path::new("/"));
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            (p.to_path_buf(), name)
+        };
+
+        let Ok(entries) = std::fs::read_dir(&parent) else {
+            return;
+        };
+        let mut matches: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let show_hidden = prefix.starts_with('.');
+                if name.starts_with(prefix) && (show_hidden || !name.starts_with('.')) {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        matches.sort();
+
+        if matches.is_empty() {
+            return;
+        }
+
+        let completed = if matches.len() == 1 {
+            matches.into_iter().next().unwrap() + "/"
+        } else {
+            // Common prefix of all matches
+            let mut common = matches[0].clone();
+            for m in &matches[1..] {
+                while !m.starts_with(&*common) {
+                    common.pop();
+                }
+            }
+            common
+        };
+
+        let mut result = parent.join(&completed).to_string_lossy().to_string();
+        // Restore ~ prefix
+        if let (true, Some(home)) = (input.starts_with('~'), dirs::home_dir()) {
+            let h = home.to_string_lossy();
+            if let Some(rest) = result.strip_prefix(&*h) {
+                result = "~".to_string() + rest;
+            }
+        }
+
+        self.relocate_input = result;
+        self.relocate_cursor = self.relocate_input.len();
     }
 
     fn navigate_results_next(&mut self) {

@@ -73,6 +73,13 @@ pub enum Command {
     Update,
     /// Uninstall ase (remove binary, shell integration, and cache)
     Uninstall,
+    /// Move a Claude Code session to a different project directory
+    Relocate {
+        /// Session ID (UUID)
+        session_id: String,
+        /// Target directory path (absolute or relative)
+        target_directory: String,
+    },
 }
 
 pub fn run() -> anyhow::Result<()> {
@@ -83,6 +90,10 @@ pub fn run() -> anyhow::Result<()> {
             Command::Update => crate::update::self_update(),
             Command::Uninstall => uninstall(),
             Command::Init { shell } => print_init(shell.as_deref().unwrap_or("")),
+            Command::Relocate {
+                session_id,
+                target_directory,
+            } => relocate_session(session_id, target_directory),
         };
     }
 
@@ -451,6 +462,180 @@ fn resume_session_by_id(id: &str, yolo: bool) -> anyhow::Result<()> {
     }
     let status = command.status()?;
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn relocate_session(session_id: &str, target_dir: &str) -> anyhow::Result<()> {
+    let mut engine = SessionSearch::new();
+    engine.get_all_sessions(false, None, false);
+    let session = engine
+        .get_session_by_id(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?
+        .clone();
+
+    let new_dir = do_relocate(&session, target_dir, &engine)?;
+
+    let home = dirs::home_dir().unwrap_or_default();
+    let home_str = home.to_string_lossy();
+    let old_short = session.directory.replace(&*home_str, "~");
+    let new_short = new_dir.replace(&*home_str, "~");
+    println!("Relocated session {session_id}");
+    println!("  from: {old_short}");
+    println!("    to: {new_short}");
+
+    Ok(())
+}
+
+/// Core relocate logic shared by CLI and TUI.
+/// Returns the resolved absolute target directory path on success.
+pub(crate) fn do_relocate(
+    session: &Session,
+    target_dir: &str,
+    engine: &SessionSearch,
+) -> anyhow::Result<String> {
+    use std::path::Path;
+
+    if session.agent != "claude" {
+        anyhow::bail!(
+            "Relocate is only supported for Claude Code sessions, not '{}'",
+            session.agent
+        );
+    }
+
+    let target = Path::new(target_dir);
+    let target_abs = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(target)
+    };
+    let target_abs = target_abs.canonicalize().unwrap_or(target_abs);
+    let new_dir = target_abs.to_string_lossy().into_owned();
+
+    if session.directory == new_dir {
+        anyhow::bail!("Session is already in {new_dir}");
+    }
+
+    let cfg = crate::config::AppConfig::load();
+    let sessions_dir = cfg.agent_dir("claude", crate::config::claude_dir());
+    let source_jsonl = find_claude_session_file(&sessions_dir, &session.id)?;
+    let source_project_dir = source_jsonl.parent().unwrap();
+
+    let target_dir_name = encode_claude_project_dir(&new_dir);
+    let target_project_dir = sessions_dir.join(&target_dir_name);
+    std::fs::create_dir_all(&target_project_dir)?;
+
+    let target_jsonl = target_project_dir.join(format!("{}.jsonl", session.id));
+    if target_jsonl.exists() {
+        anyhow::bail!(
+            "Session already exists in target: {}",
+            target_jsonl.display()
+        );
+    }
+
+    let data = std::fs::read_to_string(&source_jsonl)?;
+    let updated = rewrite_cwd_in_jsonl(&data, &session.directory, &new_dir);
+    std::fs::write(&target_jsonl, &updated)?;
+
+    let source_data_dir = source_project_dir.join(&session.id);
+    if source_data_dir.is_dir() {
+        let target_data_dir = target_project_dir.join(&session.id);
+        if std::fs::rename(&source_data_dir, &target_data_dir).is_err() {
+            copy_dir_recursive(&source_data_dir, &target_data_dir)?;
+            std::fs::remove_dir_all(&source_data_dir)?;
+        }
+    }
+
+    std::fs::remove_file(&source_jsonl)?;
+
+    let source_index = source_project_dir.join("sessions-index.json");
+    if source_index.exists() {
+        let _ = remove_from_sessions_index(&source_index, &session.id);
+    }
+
+    engine.delete_from_index(&session.id);
+    engine.invalidate_index();
+
+    Ok(new_dir)
+}
+
+/// Find a Claude session JSONL file by scanning all project subdirs.
+fn find_claude_session_file(
+    sessions_dir: &std::path::Path,
+    session_id: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    let filename = format!("{session_id}.jsonl");
+    if sessions_dir.is_dir() {
+        for entry in std::fs::read_dir(sessions_dir)?.flatten() {
+            if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                continue;
+            }
+            let candidate = entry.path().join(&filename);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+    anyhow::bail!(
+        "Cannot find JSONL file for session {session_id} in {}",
+        sessions_dir.display()
+    )
+}
+
+/// Encode a directory path to Claude Code's project directory name.
+/// Replaces path separators and special chars with dashes.
+fn encode_claude_project_dir(path: &str) -> String {
+    let mut result = String::with_capacity(path.len());
+    for c in path.chars() {
+        match c {
+            '/' | '\\' | ':' | '.' | '_' | ' ' => result.push('-'),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
+/// Rewrite "cwd" fields in JSONL data from old_dir to new_dir.
+fn rewrite_cwd_in_jsonl(data: &str, old_dir: &str, new_dir: &str) -> String {
+    // The cwd field is a JSON string value, so we can do safe string replacement
+    // on the serialized form: "cwd":"<old>" → "cwd":"<new>"
+    let old_pattern = format!("\"cwd\":\"{}\"", old_dir);
+    let new_pattern = format!("\"cwd\":\"{}\"", new_dir);
+    // Also handle the form with a space after colon
+    let old_pattern_sp = format!("\"cwd\": \"{}\"", old_dir);
+    let new_pattern_sp = format!("\"cwd\": \"{}\"", new_dir);
+    data.replace(&old_pattern, &new_pattern)
+        .replace(&old_pattern_sp, &new_pattern_sp)
+}
+
+/// Remove a session entry from sessions-index.json.
+fn remove_from_sessions_index(
+    index_path: &std::path::Path,
+    session_id: &str,
+) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(index_path)?;
+    let mut index: serde_json::Value = serde_json::from_str(&content)?;
+    if let Some(entries) = index.get_mut("entries").and_then(|e| e.as_array_mut()) {
+        entries.retain(|e| {
+            e.get("sessionId")
+                .and_then(|id| id.as_str())
+                .is_none_or(|id| id != session_id)
+        });
+    }
+    std::fs::write(index_path, serde_json::to_string_pretty(&index)?)?;
+    Ok(())
+}
+
+/// Recursively copy a directory.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)?.flatten() {
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 fn print_stats(cli: &Cli) -> anyhow::Result<()> {

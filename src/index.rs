@@ -170,6 +170,12 @@ impl TantivyIndex {
         let _ = fs::write(&marker, "");
     }
 
+    /// Remove the scan marker to force the next scan to re-read from adapters.
+    pub fn invalidate_scan_marker(&self) {
+        let marker = self.index_path.join(SCAN_MARKER);
+        let _ = fs::remove_file(&marker);
+    }
+
     fn searcher(&self) -> Searcher {
         self.reader.as_ref().unwrap().searcher()
     }

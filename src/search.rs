@@ -449,4 +449,14 @@ impl SessionSearch {
         }
         vec![]
     }
+
+    /// Delete a session from the Tantivy index by ID.
+    pub fn delete_from_index(&self, id: &str) {
+        self.index.delete_sessions(&[id.to_string()]);
+    }
+
+    /// Invalidate the scan freshness marker so the next scan re-reads from adapters.
+    pub fn invalidate_index(&self) {
+        self.index.invalidate_scan_marker();
+    }
 }

@@ -107,6 +107,7 @@
 <tr><td><kbd>Ctrl+P</kbd></td><td>Toggle preview layout (bottom / right)</td></tr>
 <tr><td><kbd>Ctrl+E</kbd></td><td>Toggle mouse capture (on = scroll/click, off = select text)</td></tr>
 <tr><td><kbd>Shift+mouse drag</kbd></td><td>Native text selection (even with mouse capture on)</td></tr>
+<tr><td><kbd>Ctrl+O</kbd></td><td>Relocate session to a different directory (Claude only)</td></tr>
 <tr><td><kbd>Ctrl+R</kbd></td><td>Refresh sessions (re-scan all adapters)</td></tr>
 <tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd> / <kbd>Ctrl+Q</kbd></td><td>Quit</td></tr>
 </table>
@@ -146,6 +147,9 @@ ase --list --format=json     # JSON lines (one object per line)
 ase --preview &lt;session-id&gt;   # Print session content to stdout
 ase --resume &lt;session-id&gt;    # Resume session directly by ID
 
+# Session management
+ase relocate &lt;id&gt; &lt;dir&gt;      # Move a Claude session to a different directory
+
 # Other
 ase --stats                  # Show index stats
 ase update                   # Self-update to latest release
@@ -164,7 +168,8 @@ ase init fish          # explicit shell</code></pre>
 <pre><code class="language-toml">[keybindings]
 quit = ["esc", "ctrl+c", "ctrl+q"]
 toggle_sort = "ctrl+s"
-copy_session_content = "y"</code></pre>
+copy_session_content = "y"
+relocate_session = "ctrl+o"</code></pre>
 <p>Key format: <code>modifier+key</code> (e.g. <code>ctrl+s</code>, <code>shift+up</code>, <code>backtick</code>). Unmentioned actions keep defaults.</p>
 
 <p>See <a href="theme.html">Theme</a> for customizing TUI colors with Material You color roles.</p>

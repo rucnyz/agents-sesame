@@ -46,6 +46,9 @@ pub enum Action {
     CopySessionContent,
     SwitchToResults,
 
+    // Relocate mode
+    RelocateSession,
+
     // Cross-pane shift navigation (behavior inverts based on focus)
     ShiftDown,
     ShiftUp,
@@ -171,6 +174,7 @@ fn action_from_str(name: &str) -> Option<Action> {
         "shift_up" => Some(Action::ShiftUp),
         "shift_page_down" => Some(Action::ShiftPageDown),
         "shift_page_up" => Some(Action::ShiftPageUp),
+        "relocate_session" => Some(Action::RelocateSession),
         _ => None,
     }
 }
@@ -274,6 +278,10 @@ impl KeyBindings {
                 vec![k(KeyCode::BackTab, none)],
             ),
             (Action::RefreshSessions, vec![k(KeyCode::Char('r'), ctrl)]),
+            (
+                Action::RelocateSession,
+                vec![k(KeyCode::Char('o'), ctrl)],
+            ),
             // Results-focused
             (Action::NavigateDown, vec![k(KeyCode::Down, none)]),
             (Action::NavigateUp, vec![k(KeyCode::Up, none)]),

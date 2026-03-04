@@ -299,6 +299,46 @@ fn draw_title_bar(f: &mut ratatui::Frame, area: Rect, app: &App) {
 
 fn draw_search_box(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let theme = &app.theme;
+
+    if app.relocate_mode {
+        // Relocate mode: show directory input
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.tertiary))
+            .title(" Relocate to ");
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let mut spans = vec![Span::styled(
+            "> ",
+            Style::default().fg(theme.tertiary),
+        )];
+
+        if app.relocate_input.is_empty() {
+            spans.push(Span::styled(
+                "Enter target directory path...",
+                Style::default().fg(theme.on_surface_variant),
+            ));
+        } else {
+            spans.push(Span::styled(
+                &app.relocate_input,
+                Style::default().fg(theme.on_surface),
+            ));
+        }
+
+        f.render_widget(Paragraph::new(Line::from(spans)), inner);
+
+        let cursor_x = inner.x
+            + 2
+            + unicode_width::UnicodeWidthStr::width(&app.relocate_input[..app.relocate_cursor])
+                as u16;
+        if cursor_x < inner.x + inner.width {
+            f.set_cursor_position((cursor_x, inner.y));
+        }
+        return;
+    }
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.primary))
@@ -601,6 +641,21 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let key = Style::default().fg(theme.primary);
     let dim = Style::default().fg(theme.on_surface_variant);
 
+    if app.relocate_mode {
+        let spans = vec![
+            Span::styled(" Enter", key),
+            Span::styled(" confirm ", dim),
+            Span::styled(" Esc", key),
+            Span::styled(" cancel ", dim),
+            Span::styled(" ^U", key),
+            Span::styled(" clear ", dim),
+            Span::styled(" ^Bksp", key),
+            Span::styled(" del path segment", dim),
+        ];
+        f.render_widget(Line::from(spans), area);
+        return;
+    }
+
     let spans = if app.focused_pane == FocusedPane::Preview {
         vec![
             Span::styled(" ↑↓", key),
@@ -636,6 +691,8 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, app: &App) {
             Span::styled(" layout ", dim),
             Span::styled(" ^D", key),
             Span::styled(" scope ", dim),
+            Span::styled(" ^O", key),
+            Span::styled(" relocate ", dim),
             Span::styled(" Esc/^Q", key),
             Span::styled(" quit", dim),
         ]
